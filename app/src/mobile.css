@@ -1,0 +1,303 @@
+/* ============================================
+   MisenMore — Mobile Ergonomic Overrides
+   Thumb-zone nav, chunky targets, soft corners
+   Applied AFTER index.css via media query
+   ============================================ */
+
+@media (max-width: 768px) {
+
+  /* ---- Layout & Spacing ---- */
+  .app-shell {
+    padding-bottom: 110px;
+  }
+
+  .main-content {
+    padding: 12px 12px 24px;
+  }
+
+  /* ---- Dashboard Grid — single column, generous gaps ---- */
+  .dashboard-grid {
+    display: flex !important;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .dash-card {
+    border-radius: 20px;
+    padding: var(--space-4) var(--space-5);
+  }
+
+  /* ---- Weather Forecast — compact strip at top ---- */
+  .weather-forecast-card {
+    border-radius: 20px;
+    padding: var(--space-3) var(--space-4);
+    order: -1; /* always first */
+  }
+
+  .weather-card-title {
+    font-size: 12px;
+    margin-bottom: var(--space-1);
+  }
+
+  .forecast-container {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: var(--space-2);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 4px;
+  }
+
+  .forecast-block {
+    flex: 0 0 auto;
+    min-width: 72px;
+    width: auto;
+    flex-direction: column !important;
+    padding: var(--space-2);
+    scroll-snap-align: start;
+    border-radius: var(--radius-md);
+  }
+
+  .forecast-day-label {
+    font-size: 11px;
+  }
+
+  .forecast-icon {
+    font-size: 18px;
+    margin-bottom: var(--space-1);
+  }
+
+  .forecast-temps {
+    font-size: 13px;
+    margin-bottom: var(--space-1);
+  }
+
+  .forecast-metrics {
+    flex-direction: column;
+    gap: 2px;
+    border-top: none;
+    padding-top: 0;
+    width: auto;
+  }
+
+  .forecast-metric {
+    font-size: 10px;
+  }
+
+  /* ---- Morning Notes ---- */
+  .morning-notes-card {
+    min-height: auto;
+  }
+
+  .notes-list li {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+  }
+
+  /* ---- Tasks — chunky tap targets ---- */
+  .task-row {
+    min-height: 52px;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+  }
+
+  .task-box {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* ---- Recipes card ---- */
+  .active-recipes-card {
+    min-height: auto;
+  }
+
+  /* ---- Knowledge Base — HIDDEN on mobile ---- */
+  .kb-section {
+    display: none !important;
+  }
+
+  /* ---- Sales Briefing ---- */
+  .sales-briefing-card {
+    border-radius: 20px;
+  }
+
+  /* ---- Buttons — pill-shaped, chunky ---- */
+  .btn {
+    min-height: 48px;
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-sm);
+    padding: var(--space-3) var(--space-6);
+  }
+
+  /* ---- Assistant Widget — hide floating FAB on mobile ---- */
+  .assistant-widget-container {
+    /* Container stays visible for the popup panel; only the FAB below is hidden */
+    position: fixed;
+    z-index: 200;
+  }
+
+  .assistant-widget-fab {
+    display: none !important;
+  }
+
+  .assistant-widget-window {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    z-index: 200;
+    animation: mobileSlideUp 0.3s ease;
+  }
+
+  @keyframes mobileSlideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ---- Bottom Tab Bar — ergonomic, thick, pill ---- */
+  .bottom-tab-bar {
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    transform: none;
+    height: 72px;
+    border-radius: 36px;
+    padding: var(--space-2) var(--space-3);
+    gap: 0;
+    justify-content: space-around;
+    align-items: center;
+    background: rgba(24, 24, 27, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  }
+
+  .bottom-tab-link {
+    padding: var(--space-1) var(--space-1);
+    min-width: 48px;
+  }
+
+  .bottom-tab-link .tab-icon {
+    font-size: 1.15rem;
+  }
+
+  .bottom-tab-link .tab-label {
+    font-size: 8px;
+    font-weight: 600;
+  }
+
+  .bottom-tab-link.active {
+    color: var(--accent);
+  }
+
+  /* ---- Center Assistant Button (raised orange FAB in nav) ---- */
+  .bottom-tab-center {
+    position: relative;
+    top: -16px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #0f1014;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(249, 115, 22, 0.45);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    min-width: auto;
+  }
+
+  .bottom-tab-center .tab-icon {
+    font-size: 1.6rem;
+    color: #0f1014;
+  }
+
+  .bottom-tab-center .tab-label {
+    display: none;
+  }
+
+  .bottom-tab-center:active {
+    transform: scale(0.92);
+  }
+
+  .bottom-tab-center.active {
+    color: #0f1014;
+    box-shadow: 0 4px 24px rgba(249, 115, 22, 0.6);
+  }
+
+  /* ---- Dashboard Header — tighter ---- */
+  .dashboard-header {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .header-title {
+    font-size: var(--font-size-xl);
+  }
+
+  .header-date {
+    font-size: var(--font-size-xs);
+  }
+
+  /* ---- Card headers — tighter ---- */
+  .card-header-row {
+    padding-bottom: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+
+  .dash-card-heading {
+    font-size: var(--font-size-xs);
+  }
+
+  /* ---- Page header ---- */
+  .page-title {
+    font-size: var(--font-size-xl);
+  }
+
+  /* ---- Briefing cycler — smaller ---- */
+  .briefing-cycler {
+    padding: 2px 8px !important;
+  }
+
+  /* ---- Hide scrollbar on forecast ---- */
+  .forecast-container::-webkit-scrollbar {
+    display: none;
+  }
+
+  .forecast-container {
+    scrollbar-width: none;
+  }
+
+  /* ---- Voice — fullscreen overlay & chunky mic on mobile ---- */
+  .voice-overlay {
+    position: fixed;
+    z-index: 300;
+  }
+
+  .mic-btn {
+    width: 48px;
+    height: 48px;
+    font-size: 18px;
+  }
+
+  .bottom-tab-center.long-press-active {
+    animation: longPressScale 1.5s ease-out forwards;
+  }
+}
