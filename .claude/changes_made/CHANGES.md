@@ -2,6 +2,77 @@
 
 ---
 
+### 2026-04-17 — Phase 3: Supabase Auth + JWT Custom Claim Hook
+
+**Type:** `feat`
+**Summary:** Phase 3 wired JWT stamping end-to-end. Two migrations applied:
+first hardened `search_path` on the Phase 2 helpers (`current_org_id`,
+`match_chunks`) to silence the Supabase advisor before Phase 7 RLS policies
+start calling them on every authenticated query. Second created the
+`custom_access_token_hook` that stamps `org_id`, `org_slug`, and `role` into
+JWT `app_metadata` on every sign-in/refresh. Verified against a real
+password sign-in — the issued JWT now carries all three claims.
+
+**Details:**
+- Migration `20260416030000_harden_function_search_paths` — `alter function
+  public.current_org_id() set search_path = ''` (tightest; body only touches
+  `pg_catalog`, which is implicit); `alter function
+  public.match_chunks(vector, int, uuid) set search_path = public` (needs
+  `public` for the pgvector `<=>` operator). Pure metadata change, no body
+  rewrites
+- Migration `20260416030100_custom_access_token_hook` — `security definer`
+  plpgsql function matching the IMPLEMENTATION_PLAN spec verbatim. Resolves
+  oldest `org_members` row per user (multi-org switching is a future
+  concern), stamps `{app_metadata,org_id|org_slug|role}`, returns the
+  modified event. `revoke execute … from public, anon, authenticated` runs
+  before `grant to supabase_auth_admin` to close the implicit PUBLIC grant
+  window that `create or replace function` opens by default
+- Dashboard hook toggle enabled manually: Authentication → Hooks → Custom
+  Access Token → `public.custom_access_token_hook`. No MCP/CLI path for this
+  step — strictly dashboard
+- Test scaffolding kept for Phase 4 sign-in target: user `test@misenmore.local`
+  (uuid `f39be8bb-325d-4fb6-8bdd-5ef4339df3ae`), org `test-org` (uuid
+  `cbc0aaeb-b1b3-489e-849d-0d0e1fe09b9e`), `org_members` row with role
+  `owner`. Tear down before first real org provisioning in Phase 8
+
+**Verification:**
+- `pg_proc` query confirms `search_path` now set on all three functions:
+  `current_org_id=""`, `match_chunks=public`, `custom_access_token_hook=public`
+  with `prosecdef=true` on the hook only
+- Grants on the hook function: `postgres` (owner), `service_role` (inherited),
+  `supabase_auth_admin` (explicit). `public`/`anon`/`authenticated` NOT in
+  the grantee list — revoke closed the implicit PUBLIC grant
+- Direct function invocation, provisioned-user path: claims stamped
+  correctly with all three org fields in the returned event
+- Direct function invocation, missing-membership path (uuid
+  `00000000-...`): event passed through unchanged, `app_metadata` remains
+  `{}`, no error — graceful no-op confirmed for Phase 4 ProtectedRoute
+  "Account not provisioned" state
+- End-to-end real sign-in: `POST /auth/v1/token?grant_type=password` for
+  `test@misenmore.local` returned an access token whose decoded payload
+  contains `app_metadata.org_id=cbc0aaeb-b1b3-489e-849d-0d0e1fe09b9e`,
+  `app_metadata.org_slug=test-org`, `app_metadata.role=owner` alongside
+  GoTrue's default `provider`/`providers` fields
+- Advisor re-run: both `function_search_path_mutable` WARNs from Phase 2
+  are cleared. No new warnings introduced by the hook. Remaining advisor
+  items are all expected Phase 7 work (domain-table RLS) plus the deferred
+  `extension_in_public` WARN on `vector`
+
+**Followups (not Phase 3 scope):**
+- Multi-org tiebreaker — `order by m.created_at asc limit 1` is
+  non-deterministic on sub-microsecond timestamp collisions. Irrelevant
+  until multi-org membership lands; flagged in the function body comment
+- Test user/org teardown before Phase 8 real-org provisioning
+- `extension_in_public` WARN on `vector` still present; per Phase 3
+  pre-work discussion we're leaving it until concrete operational pain
+
+**Next:** Phase 4 — React `AuthContext` + `OrgContext` + `withOrg` helper,
+`Login.jsx`, and `ProtectedRoute.jsx`. Login page calls
+`supabase.auth.signInWithPassword` and redirects to `/o/:orgSlug` read
+from JWT claims.
+
+---
+
 ### 2026-04-16 — Phase 2: Database Schema
 
 **Type:** `feat`
