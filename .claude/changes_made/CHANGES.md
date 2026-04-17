@@ -2,6 +2,63 @@
 
 ---
 
+### 2026-04-16 — Phase 2: Database Schema
+
+**Type:** `feat`
+**Summary:** Applied all 4 Phase 2 migrations to MisenMore Supabase project
+`unqflkmrdfmxtggrcglc`. Clean-room multi-tenant schema: 13 tables, all domain
+tables stamped with `org_id uuid not null references organizations(id) on
+delete cascade`. Extensions (`pgcrypto`, `vector 0.8.0`), helper functions
+(`current_org_id()`, `match_chunks()`), and IVFFlat vector index in place.
+RLS enabled only on `organizations` and `org_members`; domain-table RLS
+intentionally deferred to Phase 7 per plan.
+
+**Details:**
+- Migration `20260416022100_extensions_and_organizations` — enabled pgcrypto
+  + pgvector, created `organizations` and `org_members` with RLS on (policies
+  deferred to Phase 7). Indexes on `org_members.user_id` and `.org_id`
+- Migration `20260416022344_domain_tables` — created 11 domain tables:
+  `workbooks`, `workbook_sheets`, `workbook_chunks` (with `vector(768)`
+  embedding column), `recipe_categories`, `briefings`, `briefing_tasks`,
+  `sales_data`, `management_notes`, `upcoming_banquets`,
+  `banquet_event_orders`, `weekly_features`. Every table has `org_id uuid
+  not null references organizations(id) on delete cascade`. All check
+  constraints and unique constraints from plan applied verbatim
+- Migration `20260416023743_indexes` — 11 secondary indexes, all
+  org_id-leading to match query patterns
+- Migration `20260416025001_postgres_helpers` — `current_org_id()` reads
+  `app_metadata.org_id` from JWT claims; `match_chunks(query_embedding,
+  match_count, p_org_id)` returns top-N cosine-similar chunks scoped to
+  a single org; IVFFlat cosine index on `workbook_chunks.embedding` with
+  `lists = 100`
+- Local migration files saved under `supabase/migrations/` with matching
+  Supabase version timestamps so `supabase db pull` / `migration list`
+  stay aligned with the remote
+
+**Verification:**
+- `list_tables(public)` returns all 13 tables, rows=0 for each
+- `list_migrations` returns all 4 migration records in order
+- `select public.current_org_id()` → null (expected; no JWT in SQL editor)
+- `select count(*) from pg_proc where proname = 'match_chunks'` → 1
+- `select extversion from pg_extension where extname = 'vector'` → 0.8.0
+- IVFFlat index on workbook_chunks confirmed via `pg_indexes`
+- Security advisors reviewed: RLS-off errors on domain tables are
+  intentional (Phase 7 turns them on); INFO-level "RLS enabled no policy"
+  on `organizations` + `org_members` expected (policies Phase 7)
+
+**Followups (not Phase 2 scope):**
+- WARN: `public.current_org_id` and `public.match_chunks` have mutable
+  `search_path`. Hardening fix: `alter function ... set search_path = ''`.
+  Worth addressing before Phase 7 RLS goes live
+- WARN: `vector` extension is installed in `public` schema. Supabase
+  recommends a dedicated `extensions` schema, but moving it would cascade
+  through every `vector(768)` column — defer unless/until operational pain
+
+**Next:** Phase 3 — Supabase Auth + `custom_access_token_hook` to stamp
+`org_id`, `org_slug`, and `role` into JWT `app_metadata` on every token.
+
+---
+
 ### 2026-04-15 — Phase 1: Project Foundation
 
 **Type:** `feat`
