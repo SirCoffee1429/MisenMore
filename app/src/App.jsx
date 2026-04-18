@@ -1,4 +1,8 @@
 import { Routes, Route } from 'react-router-dom'
+import { AuthProvider } from './lib/auth/AuthContext.jsx'
+import { useAuth } from './lib/auth/useAuth.js'
+import ProtectedRoute from './components/ProtectedRoute.jsx'
+import Login from './pages/Login.jsx'
 import RoleSelect from './pages/RoleSelect.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import OfficeDashboard from './pages/OfficeDashboard.jsx'
@@ -18,10 +22,39 @@ import EventsBanquetsPage from './pages/EventsBanquetsPage.jsx'
 import RecipeCreator from './pages/RecipeCreator.jsx'
 import Communication from './pages/Communication.jsx'
 
+// Phase 4 stub — minimal authenticated landing page used to verify the
+// sign-in → ProtectedRoute → sign-out cycle works end-to-end. Phase 5
+// replaces this with the real /o/:orgSlug route tree (OfficeLayout +
+// OfficeDashboard, etc).
+function PhaseFourStub() {
+    const { user, orgSlug, role, signOut } = useAuth()
+    return (
+        <div style={{ padding: 24 }}>
+            <h1>Signed in</h1>
+            <p>User: {user?.email}</p>
+            <p>Org slug: {orgSlug}</p>
+            <p>Role: {role}</p>
+            <button onClick={() => signOut()}>Sign out</button>
+        </div>
+    )
+}
+
 export default function App() {
     return (
+        <AuthProvider>
         <Routes>
             <Route path="/" element={<RoleSelect />} />
+            <Route path="/login" element={<Login />} />
+
+            {/* Phase 4 verification target — stub office route, replaced in Phase 5 */}
+            <Route
+                path="/o/:orgSlug"
+                element={
+                    <ProtectedRoute>
+                        <PhaseFourStub />
+                    </ProtectedRoute>
+                }
+            />
 
             {/* Kitchen routes */}
             <Route path="/kitchen" element={<KitchenLayout><Dashboard /></KitchenLayout>} />
@@ -48,5 +81,6 @@ export default function App() {
             <Route path="/office/sales" element={<OfficeLayout><SalesReports /></OfficeLayout>} />
             <Route path="/office/sales/:date" element={<OfficeLayout><SalesReportDetail /></OfficeLayout>} />
         </Routes>
+        </AuthProvider>
     )
 }

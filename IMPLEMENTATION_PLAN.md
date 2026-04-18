@@ -15,7 +15,7 @@ no migration or backfill — the schema is clean from the first commit.
 - [x] Phase 1 — Project foundation (copy DailyBrief code, configure for MisenMore)
 - [x] Phase 2 — Database schema (all tables with org_id from day one)
 - [x] Phase 3 — Supabase Auth + JWT custom claim hook
-- [ ] Phase 4 — Auth/Org React contexts + Login page + ProtectedRoute
+- [x] Phase 4 — Auth/Org React contexts + Login page + ProtectedRoute
 - [ ] Phase 5 — Route structure (/k/:orgSlug, /o/:orgSlug)
 - [ ] Phase 6 — Rebuild all queries to be org-scoped
 - [ ] Phase 7 — RLS policies on all tables

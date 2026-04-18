@@ -4,7 +4,8 @@
       "Bash(robocopy \"C:/Old Hawthorne Projects/DailyBrief/app\" \"C:/MisenMore/Misenmore/app\" //E //XD node_modules dist sample-data //XF out.json read_beo.mjs //NFL //NDL //NP)",
       "Bash(echo \"robocopy exit=$?\")",
       "Bash(robocopy \"C:/Old Hawthorne Projects/DailyBrief/supabase/functions\" \"C:/MisenMore/Misenmore/supabase/functions\" //E //NFL //NDL //NP)",
-      "Bash(cp \"C:/Old Hawthorne Projects/DailyBrief/supabase/config.toml\" \"C:/MisenMore/Misenmore/supabase/config.toml\")"
+      "Bash(cp \"C:/Old Hawthorne Projects/DailyBrief/supabase/config.toml\" \"C:/MisenMore/Misenmore/supabase/config.toml\")",
+      "mcp__claude_ai_Supabase__apply_migration"
     ]
   }
 }

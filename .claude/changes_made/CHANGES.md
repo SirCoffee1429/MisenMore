@@ -2,6 +2,104 @@
 
 ---
 
+### 2026-04-17 — Phase 4: React Auth/Org Contexts + Login + ProtectedRoute
+
+**Type:** `feat`
+**Summary:** Phase 4 wired the React-side auth/org plumbing on top of the
+Phase 3 JWT hook. Seven new files plus a one-line anon SELECT policy on
+`organizations` (pulled forward from Phase 7 so OrgContext can resolve
+slugs for kitchen anon traffic). `App.jsx` got the minimum edits needed
+to verify the sign-in flow — wrapped in `<AuthProvider>`, added `/login`,
+added a stub `/o/:orgSlug` gated by `<ProtectedRoute>`. The legacy
+DailyBrief `/kitchen/*` and `/office/*` routes are intentionally left in
+place; Phase 5 rips them out and replaces them with the slug-scoped
+route tree.
+
+**Details:**
+- Migration `20260417000000_anon_select_organizations_for_slug_lookup` —
+  single policy `"anon read orgs for slug lookup"` on
+  `public.organizations` (`for select to anon using (true)`). Pulled
+  forward from Phase 7. Without this, OrgContext's slug lookup returns
+  zero rows for anon and kitchen routes can't resolve their org.
+  `organizations` holds nothing sensitive (id, slug, name, settings)
+  and the slug is already in the URL
+- `app/src/lib/auth/AuthContext.jsx` — `<AuthProvider>` wraps
+  `supabase.auth.onAuthStateChange`, exposes
+  `{ session, user, orgId, orgSlug, role, loading, signIn, signOut }`.
+  Initial `loading=true` until first `getSession()` resolves so
+  ProtectedRoute does not flash a `/login` redirect on refresh.
+  Critical fix mid-build: claims are read by **decoding the JWT
+  payload** (`session.access_token`), NOT from `session.user.app_metadata`.
+  The custom_access_token_hook stamps the JWT only; `session.user.app_metadata`
+  mirrors the `auth.users.raw_app_meta_data` DB column which the hook
+  never touches. First implementation read the wrong field and surfaced
+  as "Account not provisioned" on every sign-in. `readOrgClaims(session)`
+  is exported so Login.jsx can use the same decoder
+- `app/src/lib/auth/useAuth.js` — `useContext` hook, throws outside provider
+- `app/src/lib/org/OrgContext.jsx` — `<OrgProvider>` reads `:orgSlug`
+  from `useParams()`, queries `organizations` by slug via `maybeSingle()`,
+  exposes `{ orgId, orgSlug, orgName, loading, error }`. Error states:
+  `'missing_slug'`, `'not_found'`, or the raw Supabase error message.
+  Cancellable via mounted-flag pattern to avoid setState-after-unmount
+  on rapid slug changes
+- `app/src/lib/org/useOrg.js` — same throws-outside-provider pattern
+- `app/src/lib/org/withOrg.js` — stamps `org_id` onto write payloads
+  (object or array). Throws if `orgId` is falsy — refuses to write an
+  unscoped row rather than producing a silently-broken multi-tenant insert.
+  Per CLAUDE.md rule 11: every INSERT/UPDATE wraps with this
+- `app/src/components/ProtectedRoute.jsx` — children-as-prop wrapper.
+  Resolution order: `loading` → no session → no org claim → URL slug
+  mismatch vs JWT slug → render. Slug-mismatch redirects to JWT slug
+  via `<Navigate replace>` so a manager can never see another org's
+  shell even briefly. "Account not provisioned" is the no-org-claim
+  fallback — covers the Phase 3 graceful no-op path
+- `app/src/pages/Login.jsx` — email/password form. Uses `signIn` from
+  AuthContext, decodes the returned session via the shared
+  `readOrgClaims` helper, navigates to `/o/${slug}` on success.
+  `useEffect` redirects already-signed-in visitors away from `/login`
+  (covers refresh-while-authenticated). Error states: invalid creds
+  (Supabase message passthrough), unprovisioned account (signed in
+  but JWT carries no org_slug)
+- `app/src/App.jsx` — wrapped `<Routes>` in `<AuthProvider>`, added
+  `/login` route, added `/o/:orgSlug` route gated by `<ProtectedRoute>`
+  rendering an inline `PhaseFourStub` (email/slug/role + Sign out
+  button). All legacy `/kitchen/*` and `/office/*` routes preserved
+  unchanged — Phase 5 territory
+
+**Verification:**
+- Vite dev booted clean on port 5176 (5173–5175 occupied by stale
+  background dev servers from prior sessions, irrelevant)
+- `/login` → enter `test@misenmore.local` / `testing` → redirected to
+  `/o/test-org` → stub renders `User: test@misenmore.local`,
+  `Org slug: test-org`, `Role: owner`. Confirms JWT decode reads the
+  hook-stamped claims correctly
+- Sign out from stub → bounced to `/login` (auth state change clears
+  session, ProtectedRoute re-renders with no session)
+- Visit `/o/test-org` while signed out → redirected to `/login`
+- Sign in, visit `/o/wrong-slug` → redirected to `/o/test-org`
+  (slug-mismatch guard fires)
+- Refresh on `/o/test-org` while signed in → brief "Loading…" blip,
+  then stub re-renders. URL never leaves `/o/test-org`. Confirms the
+  loading-gate prevents a false `/login` flash on `getSession()` rehydrate
+
+**Followups (not Phase 4 scope):**
+- Phase 5 will rip out `RoleSelect`, the legacy `/kitchen/*` and
+  `/office/*` route trees, and `Communication.jsx` (not in the planned
+  route map). The `PhaseFourStub` inline component in `App.jsx` gets
+  replaced by the real OfficeLayout + OfficeDashboard tree at the same
+  time
+- OrgProvider is written but unmounted in Phase 4 — first real exercise
+  is Phase 5 when kitchen routes wrap in `<OrgProvider>` via OrgResolver
+- The early anon SELECT policy on `organizations` needs to stay in
+  Phase 7's policy list — note already in the migration comment
+
+**Next:** Phase 5 — Route restructuring. Replace the DailyBrief route
+tree with `/k/:orgSlug/*` (anon, OrgProvider-scoped) and `/o/:orgSlug/*`
+(auth-gated, ProtectedRoute-scoped). Layouts and nav links read slug
+from context, not hardcoded paths.
+
+---
+
 ### 2026-04-17 — Phase 3: Supabase Auth + JWT Custom Claim Hook
 
 **Type:** `feat`
