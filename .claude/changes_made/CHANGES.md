@@ -2,6 +2,55 @@
 
 ---
 
+### 2026-04-18 — Phase 5: Route Structure
+
+**Type:** `feat`
+**Summary:** Replaced the legacy DailyBrief flat route tree with slug-scoped
+nested routes. Both layouts now read org slug from context and build all nav
+links dynamically. Legacy `/kitchen/*` and `/office/*` routes deleted.
+
+**Details:**
+- `app/src/components/OrgResolver.jsx` — new component. Mounts `<OrgProvider>`
+  and gates kitchen routes via an inner `OrgGate` component that reads
+  `useOrg()` and renders loading/404/error states before passing through to
+  `<KitchenLayout />`. Keeps guard logic out of the layout itself
+- `app/src/pages/ManagementBoardPage.jsx` — renamed from `Communication.jsx`.
+  Wraps `ManagementWhiteboard`, updated header to "Management Board" with
+  chalkboard icon. `Communication.jsx` deleted
+- `app/src/components/KitchenLayout.jsx` — switched `{children}` to
+  `<Outlet />` for nested route rendering. Imports `useOrg()` and builds all
+  nav links as `/k/${orgSlug}/...`. Sales tab removed (kitchen never sees
+  sales per CLAUDE.md). Briefings tab added in its place. "Tasks" tab
+  renamed "Chat" and icon updated to `fa-comments` to match the AiChat route
+  it points to
+- `app/src/components/OfficeLayout.jsx` — switched `{children}` to
+  `<Outlet />`. Imports `useAuth()` and builds all nav links as
+  `/o/${orgSlug}/...`. DailyBrief `handleLogout` (sessionStorage + navigate)
+  replaced with `signOut()` from AuthContext. "Communication" nav item
+  renamed "Board" pointing to `/o/${orgSlug}/board`. `useNavigate` import
+  removed
+- `app/src/App.jsx` — full route tree rewrite. Legacy `/kitchen/*` and
+  `/office/*` flat routes deleted. `PhaseFourStub` component deleted.
+  Kitchen routes nested under `/k/:orgSlug` with `<OrgResolver><KitchenLayout /></OrgResolver>`
+  as parent element. Office routes nested under `/o/:orgSlug` with
+  `<ProtectedRoute><OfficeLayout /></ProtectedRoute>` as parent element.
+  All sub-routes are children using `<Outlet />` injection
+
+**Verification:**
+- `vite build --mode development` — 122 modules, zero errors, clean compile
+- `/k/test-org` → kitchen dashboard loads anonymously, nav links use
+  `/k/test-org/...`
+- `/k/nonexistent-slug` → "Organization not found" error state from OrgGate
+- `/o/test-org` (signed in) → office dashboard, nav links use
+  `/o/test-org/...`, Sign Out calls `signOut()` from AuthContext
+- Refresh on any route preserves correct context
+
+**Next:** Phase 6 — Rebuild all queries to be org-scoped. Every Supabase
+query passes `org_id`. Every write uses `withOrg()`. Every edge function
+stamps `org_id`.
+
+---
+
 ### 2026-04-17 — Phase 4: React Auth/Org Contexts + Login + ProtectedRoute
 
 **Type:** `feat`

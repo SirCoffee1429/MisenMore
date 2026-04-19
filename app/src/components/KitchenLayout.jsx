@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, Outlet } from 'react-router-dom'
 import AssistantWidget from './AssistantWidget.jsx'
+import { useOrg } from '../lib/org/useOrg.js'
 
 
-export default function KitchenLayout({ children }) {
+export default function KitchenLayout() {
+    const { orgSlug } = useOrg()
     const [assistantOpen, setAssistantOpen] = useState(false)
     const [voiceMode, setVoiceMode] = useState(false)
     const [longPressActive, setLongPressActive] = useState(false)
@@ -38,7 +40,7 @@ export default function KitchenLayout({ children }) {
     return (
         <div className="app-shell">
             <main className="main-content">
-                {children}
+                <Outlet />
             </main>
 
             {/* Assistant widget — FAB hidden on mobile via CSS; chat panel still works */}
@@ -49,10 +51,9 @@ export default function KitchenLayout({ children }) {
                 onVoiceModeEnd={() => setVoiceMode(false)}
             />
 
-
             <nav className="bottom-tab-bar">
                 <NavLink
-                    to="/kitchen"
+                    to={`/k/${orgSlug}`}
                     end
                     className={({ isActive }) => `bottom-tab-link ${isActive ? 'active' : ''}`}
                 >
@@ -61,11 +62,11 @@ export default function KitchenLayout({ children }) {
                 </NavLink>
 
                 <NavLink
-                    to="/kitchen/sales"
+                    to={`/k/${orgSlug}/briefings`}
                     className={({ isActive }) => `bottom-tab-link ${isActive ? 'active' : ''}`}
                 >
-                    <i className="tab-icon fa-solid fa-chart-line" />
-                    <span className="tab-label">Sales</span>
+                    <i className="tab-icon fa-solid fa-clipboard-list" />
+                    <span className="tab-label">Briefings</span>
                 </NavLink>
 
                 {/* Center assistant button — raised orange FAB on mobile, with long-press voice */}
@@ -82,7 +83,7 @@ export default function KitchenLayout({ children }) {
                 </button>
 
                 <NavLink
-                    to="/kitchen/recipes"
+                    to={`/k/${orgSlug}/recipes`}
                     className={({ isActive }) => `bottom-tab-link ${isActive ? 'active' : ''}`}
                 >
                     <i className="tab-icon fa-solid fa-utensils" />
@@ -90,11 +91,11 @@ export default function KitchenLayout({ children }) {
                 </NavLink>
 
                 <NavLink
-                    to="/kitchen/chat"
+                    to={`/k/${orgSlug}/chat`}
                     className={({ isActive }) => `bottom-tab-link ${isActive ? 'active' : ''}`}
                 >
-                    <i className="tab-icon fa-solid fa-list-check" />
-                    <span className="tab-label">Tasks</span>
+                    <i className="tab-icon fa-solid fa-comments" />
+                    <span className="tab-label">Chat</span>
                 </NavLink>
             </nav>
         </div>
