@@ -1,17 +1,25 @@
 import { useState } from 'react'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
 import { useCategories } from '../lib/useCategories.js'
+import { useCurrentOrg } from '../lib/useCurrentOrg.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
 const EMPTY_ROW = { ingredient: '', quantity: '', measure: '', unitCost: '', totalCost: '' }
 
+// RecipeCreator — in-app form-based recipe builder mounted under both
+// kitchen and office route trees. source resolves backlink + destination.
+// Every insert (workbooks, workbook_sheets, workbook_chunks) is stamped
+// with org_id via withOrg, and the embed-chunks call forwards org_id too.
 export default function RecipeCreator() {
     const navigate = useNavigate()
-    const location = useLocation()
-    const isOffice = location.pathname.startsWith('/office')
-    const backLink = isOffice ? '/office/workbooks' : '/kitchen/recipes'
+    const { orgId, orgSlug, source } = useCurrentOrg()
+    const isOffice = source === 'auth'
+    const backLink = isOffice
+        ? `/o/${orgSlug}/workbooks`
+        : `/k/${orgSlug}/recipes`
 
-    const { categories } = useCategories()
+    const { categories } = useCategories(orgId)
 
     const [recipeName, setRecipeName] = useState('')
     const [selectedCategories, setSelectedCategories] = useState([])
@@ -58,6 +66,10 @@ export default function RecipeCreator() {
             alert('Please enter a recipe name.')
             return
         }
+        if (!orgId) {
+            alert('No active organization.')
+            return
+        }
 
         const filledRows = rows.filter(r => r.ingredient.trim())
         if (filledRows.length === 0) {
@@ -70,17 +82,17 @@ export default function RecipeCreator() {
         try {
             const cats = selectedCategories.length > 0 ? selectedCategories : ['Uncategorized']
 
-            // Insert workbook record — always 1 sheet now
+            // Insert workbook record — stamped with org_id via withOrg
             const { data: wbData, error: wbError } = await supabase
                 .from('workbooks')
-                .insert({
+                .insert(withOrg(orgId, {
                     file_name: recipeName.trim(),
                     file_url: null,
                     file_size: 0,
                     sheet_count: 1,
                     status: 'parsed',
                     category: cats
-                })
+                }))
                 .select()
                 .single()
 
@@ -100,7 +112,6 @@ export default function RecipeCreator() {
 
             if (assembly.trim()) {
                 const assemblyLines = assembly.trim().split('\n').filter(l => l.trim())
-                // Blank separator + "ASSEMBLY" label row + assembly content rows
                 allRows.push(['', '', '', '', ''])
                 allRows.push(['— ASSEMBLY —', '', '', '', ''])
                 assemblyLines.forEach(line => {
@@ -108,13 +119,13 @@ export default function RecipeCreator() {
                 })
             }
 
-            await supabase.from('workbook_sheets').insert([{
+            await supabase.from('workbook_sheets').insert(withOrg(orgId, [{
                 workbook_id: wbData.id,
                 sheet_name: recipeName.trim(),
                 sheet_index: 0,
                 headers: sheetHeaders,
                 rows: allRows
-            }])
+            }]))
 
             // Build chunk for AI embedding
             const ingredientChunk = filledRows.map((r, i) =>
@@ -127,17 +138,17 @@ export default function RecipeCreator() {
 
             const fullChunk = `File: ${recipeName.trim()}\nSheet: ${recipeName.trim()}\n${ingredientChunk}${assemblyChunk}`
 
-            await supabase.from('workbook_chunks').insert([{
+            await supabase.from('workbook_chunks').insert(withOrg(orgId, [{
                 workbook_id: wbData.id,
                 sheet_name: recipeName.trim(),
                 content: fullChunk,
                 row_start: 1,
                 row_end: allRows.length
-            }])
+            }]))
 
-            // Fire-and-forget embedding
+            // Fire-and-forget embedding — pass org_id for downstream scoping
             supabase.functions.invoke('embed-chunks', {
-                body: { workbook_id: wbData.id }
+                body: { workbook_id: wbData.id, org_id: orgId }
             }).then(({ error }) => {
                 if (error) console.error('Embedding error:', error)
             })
@@ -165,7 +176,7 @@ export default function RecipeCreator() {
                     <button
                         className="btn btn-primary"
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={saving || !orgId}
                         style={{ background: '#34d399', borderColor: '#34d399' }}
                     >
                         <i className={`fa-solid ${saving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'}`} />

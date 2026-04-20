@@ -7,6 +7,13 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
+// TODO(Phase 8): multi-tenant Postmark routing. Today every inbound
+// Postmark sales email is stamped to this single test org. Before the
+// first real org is provisioned, replace this with a From-address →
+// org_id lookup (e.g. a `postmark_inbound_map` table, or per-org
+// Postmark inbound addresses). Tracked against Phase 6 option (c).
+const TEST_ORG_ID = Deno.env.get("TEST_ORG_ID") || "cbc0aaeb-b1b3-489e-849d-0d0e1fe09b9e";
+
 Deno.serve(async (req) => {
   try {
     // 1. Get the payload from Postmark
@@ -123,14 +130,19 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ message: "0 items found" }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
-    // 4. Save to Supabase
+    // 4. Save to Supabase — every row scoped to TEST_ORG_ID pending
+    //    the Phase 8 Postmark multi-tenancy work.
+    const orgId = TEST_ORG_ID;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // First delete any existing data for this report date AND from this specific source 
-    // so we don't accidentally overwrite sales from other properties/terminals.
+    // Delete existing rows for this org + date + source so a resent email
+    // doesn't double-insert. Scoping by org_id is critical — otherwise a
+    // future multi-tenant deployment would clobber another org's rows
+    // that share the same date + From address.
     const { error: deleteError } = await supabase
       .from("sales_data")
       .delete()
+      .eq("org_id", orgId)
       .eq("report_date", reportDate)
       .eq("metadata->>source", payload.From);
 
@@ -143,6 +155,7 @@ Deno.serve(async (req) => {
       .from("sales_data")
       .insert(
         items.map((item) => ({
+          org_id: orgId,
           report_date: reportDate,
           item_name: item.item_name,
           units_sold: Number(item.units_sold) || 0,

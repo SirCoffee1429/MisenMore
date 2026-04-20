@@ -10,13 +10,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// embed-chunks — generates gemini-embedding-001 vectors for pending
+// workbook_chunks rows. Accepts an org_id so the chunk lookup and the
+// per-chunk UPDATE are both scoped — prevents cross-tenant embedding
+// even if a bad workbook_id is passed. Server-side uses service-role
+// so RLS does not apply; the explicit filter is the only safety net.
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const { workbook_id } = await req.json();
+    const { workbook_id, org_id: orgId } = await req.json();
 
     if (!workbook_id) {
       return new Response(JSON.stringify({ error: "Missing workbook_id" }), {
@@ -24,13 +29,24 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    if (!orgId) {
+      return new Response(JSON.stringify({ error: "Missing org_id" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+    // Only pick up chunks that belong to this workbook AND this org, and
+    // that don't yet have an embedding. Without the org_id filter a
+    // cross-tenant workbook_id would silently get embedded under another
+    // tenant's context (service role bypasses RLS).
     const { data: chunks, error } = await supabase
       .from("workbook_chunks")
       .select("id, content")
       .eq("workbook_id", workbook_id)
+      .eq("org_id", orgId)
       .is("embedding", null);
 
     if (error) throw new Error(error.message);
@@ -40,7 +56,7 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    console.log(`Embedding ${chunks.length} chunks for workbook ${workbook_id}`);
+    console.log(`Embedding ${chunks.length} chunks for workbook ${workbook_id} (org ${orgId})`);
 
     let embeddedCount = 0;
 
@@ -67,10 +83,13 @@ Deno.serve(async (req: Request) => {
       const vector = data.embedding?.values;
 
       if (vector) {
+        // Update is also org-scoped — redundant given chunk.id is the PK,
+        // but keeps the invariant "every write touches org_id" intact.
         await supabase
           .from("workbook_chunks")
           .update({ embedding: vector })
-          .eq("id", chunk.id);
+          .eq("id", chunk.id)
+          .eq("org_id", orgId);
         embeddedCount++;
       } else {
         console.error(`No vector returned for chunk ${chunk.id}:`, JSON.stringify(data));

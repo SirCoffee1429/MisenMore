@@ -18,17 +18,20 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // 1. Get the payload (expecting { pdfBase64: string } or multipart/form-data)
+    // 1. Get the payload (expecting { pdfBase64, org_id } or multipart/form-data)
     let pdfBase64 = "";
+    let orgId = "";
     const contentType = req.headers.get("content-type") || "";
 
     if (contentType.includes("application/json")) {
         const payload = await req.json();
         pdfBase64 = payload.pdfBase64;
+        orgId = payload.org_id || "";
     } else {
         // Handle multipart fallback if needed
         const formData = await req.formData();
         const file = formData.get("file") as File;
+        orgId = String(formData.get("org_id") || "");
         if (file) {
            const arrayBuffer = await file.arrayBuffer();
            const bytes = new Uint8Array(arrayBuffer);
@@ -44,7 +47,14 @@ Deno.serve(async (req) => {
     }
 
     if (!pdfBase64) {
-      return new Response(JSON.stringify({ error: "No PDF content found" }), { 
+      return new Response(JSON.stringify({ error: "No PDF content found" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    if (!orgId) {
+      return new Response(JSON.stringify({ error: "Missing org_id" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
@@ -139,6 +149,7 @@ Deno.serve(async (req) => {
       const { data: record, error } = await supabase
         .from("banquet_event_orders")
         .insert({
+            org_id: orgId,
             event_name: eventName || "Unknown Event",
             event_date: eventDate || new Date().toISOString().split("T")[0],
             start_time: event.start_time || "",

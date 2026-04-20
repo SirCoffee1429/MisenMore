@@ -52,7 +52,9 @@ const DATE_RANGES = [
     { key: 'all', label: 'All', days: null },
 ]
 
-export default function SalesTrendChart() {
+// SalesTrendChart — office-only. orgId scopes every sales_data query so
+// the chart never renders another org's revenue even if RLS is missing.
+export default function SalesTrendChart({ orgId }) {
     const [rawData, setRawData] = useState([])
     const [loading, setLoading] = useState(true)
     const [mode, setMode] = useState('daily')
@@ -65,12 +67,18 @@ export default function SalesTrendChart() {
     const svgRef = useRef(null)
 
     useEffect(() => {
+        if (!orgId) {
+            setRawData([])
+            setLoading(false)
+            return
+        }
         async function fetchData() {
             setLoading(true)
             try {
                 let query = supabase
                     .from('sales_data')
                     .select('report_date, category, item_name, units_sold, total_net_sales, net_sales')
+                    .eq('org_id', orgId)
                     .not('category', 'is', null)
                     .order('report_date', { ascending: true })
 
@@ -96,7 +104,7 @@ export default function SalesTrendChart() {
             }
         }
         fetchData()
-    }, [dateRange])
+    }, [dateRange, orgId])
 
     useEffect(() => {
         const catTotals = {}

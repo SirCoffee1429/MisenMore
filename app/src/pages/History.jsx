@@ -1,24 +1,30 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { useAuth } from '../lib/auth/useAuth.js'
 
+// History — office-only 30-day task completion log. Every read is
+// org-scoped from JWT claims.
 export default function History() {
+    const { orgId } = useAuth()
     const [days, setDays] = useState([])
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
+        if (!orgId) return
         async function load() {
             const { data: briefings } = await supabase
                 .from('briefings')
                 .select('*, briefing_tasks(*)')
+                .eq('org_id', orgId)
                 .order('date', { ascending: false })
                 .limit(30)
 
             // Group by date
             const grouped = {}
-                ; (briefings || []).forEach(b => {
-                    if (!grouped[b.date]) grouped[b.date] = []
-                    grouped[b.date].push(b)
-                })
+            ;(briefings || []).forEach(b => {
+                if (!grouped[b.date]) grouped[b.date] = []
+                grouped[b.date].push(b)
+            })
 
             const daysList = Object.entries(grouped)
                 .map(([date, briefings]) => ({ date, briefings }))
@@ -28,7 +34,7 @@ export default function History() {
             setLoading(false)
         }
         load()
-    }, [])
+    }, [orgId])
 
     if (loading) {
         return <div className="empty-state"><div className="spinner" style={{ margin: '0 auto' }} /></div>

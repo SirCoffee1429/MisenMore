@@ -1,39 +1,49 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
 const COLUMNS = [
     { key: 'comms', title: 'Department Communication', icon: 'fa-comments', accent: '#4ade80', accentBg: 'rgba(74, 222, 128, 0.08)', accentBorder: 'rgba(74, 222, 128, 0.2)' },
 ]
 
-export default function ManagementWhiteboard({ hideHeader = false }) {
+// ManagementWhiteboard — office-only posting board for management_notes
+// (comms category). orgId prop is required; writes go through withOrg so
+// the multi-tenant constraint is enforced before the row ever hits Supabase.
+export default function ManagementWhiteboard({ orgId, hideHeader = false }) {
     const [notes, setNotes] = useState([])
     const [newTexts, setNewTexts] = useState({ alerts: '', events: '', comms: '' })
     const [authorName, setAuthorName] = useState(() => localStorage.getItem('mgmt_author') || '')
     const [posting, setPosting] = useState(null)
     const inputRefs = useRef({})
 
-    useEffect(() => {
-        loadNotes()
-    }, [])
-
-    async function loadNotes() {
+    // Load notes for the active org across all categories the board renders
+    const loadNotes = useCallback(async () => {
+        if (!orgId) {
+            setNotes([])
+            return
+        }
         const { data } = await supabase
             .from('management_notes')
             .select('*')
+            .eq('org_id', orgId)
             .order('pinned', { ascending: false })
             .order('created_at', { ascending: false })
         setNotes(data || [])
-    }
+    }, [orgId])
+
+    useEffect(() => {
+        loadNotes()
+    }, [loadNotes])
 
     async function handlePost(category) {
         const content = newTexts[category]?.trim()
-        if (!content) return
+        if (!content || !orgId) return
         setPosting(category)
         const author = authorName.trim() || 'Manager'
         localStorage.setItem('mgmt_author', author)
         const { error } = await supabase
             .from('management_notes')
-            .insert({ content, author, category, pinned: false })
+            .insert(withOrg(orgId, { content, author, category, pinned: false }))
         if (!error) {
             setNewTexts(prev => ({ ...prev, [category]: '' }))
             await loadNotes()
@@ -42,12 +52,14 @@ export default function ManagementWhiteboard({ hideHeader = false }) {
     }
 
     async function handleDelete(id) {
-        await supabase.from('management_notes').delete().eq('id', id)
+        if (!orgId) return
+        await supabase.from('management_notes').delete().eq('id', id).eq('org_id', orgId)
         setNotes(prev => prev.filter(n => n.id !== id))
     }
 
     async function togglePin(id, currentPinned) {
-        await supabase.from('management_notes').update({ pinned: !currentPinned }).eq('id', id)
+        if (!orgId) return
+        await supabase.from('management_notes').update({ pinned: !currentPinned }).eq('id', id).eq('org_id', orgId)
         await loadNotes()
     }
 
@@ -97,7 +109,7 @@ export default function ManagementWhiteboard({ hideHeader = false }) {
                     const colNotes = notes.filter(n => n.category === col.key)
                     return (
                         <div key={col.key} className="wb-column" style={embeddedColumnStyle}>
-                            
+
                             {!hideHeader && (
                                 <div className="wb-col-header" style={{ borderBottomColor: col.accentBorder }}>
                                     <h3 className="wb-col-title">
@@ -170,7 +182,7 @@ export default function ManagementWhiteboard({ hideHeader = false }) {
                                         className="wb-send-btn"
                                         style={{ background: col.accent }}
                                         onClick={() => handlePost(col.key)}
-                                        disabled={posting === col.key || !newTexts[col.key]?.trim()}
+                                        disabled={posting === col.key || !newTexts[col.key]?.trim() || !orgId}
                                     >
                                         {posting === col.key
                                             ? <i className="fa-solid fa-spinner fa-spin" />

@@ -1,6 +1,11 @@
 import ManagementWhiteboard from '../components/ManagementWhiteboard.jsx'
+import { useAuth } from '../lib/auth/useAuth.js'
 
+// ManagementBoardPage — office-only shell for the full whiteboard view.
+// orgId comes from JWT claims and is forwarded to the whiteboard so its
+// reads/writes stay scoped.
 export default function ManagementBoardPage() {
+  const { orgId } = useAuth()
   return (
     <div style={{ padding: '0 1rem' }}>
       <div style={{ marginBottom: '1.5rem' }}>
@@ -31,7 +36,7 @@ export default function ManagementBoardPage() {
           padding: '1.5rem',
         }}
       >
-        <ManagementWhiteboard />
+        <ManagementWhiteboard orgId={orgId} />
       </div>
     </div>
   )

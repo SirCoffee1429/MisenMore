@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
+import { useAuth } from '../lib/auth/useAuth.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
+// BriefingEditor — office-only create/edit form for a briefing + tasks.
+// Every insert is stamped via withOrg; every update/delete filters by
+// org_id. Kitchen never hits this page (route is office-only).
 export default function BriefingEditor() {
     const { id } = useParams()
     const navigate = useNavigate()
+    const { orgId, orgSlug } = useAuth()
     const isEditing = Boolean(id)
+    const briefingsBase = `/o/${orgSlug}/briefings`
 
     const [title, setTitle] = useState('')
     const [body, setBody] = useState('')
@@ -16,16 +23,18 @@ export default function BriefingEditor() {
     const [loading, setLoading] = useState(isEditing)
 
     useEffect(() => {
-        if (isEditing) {
+        if (isEditing && orgId) {
             loadBriefing()
         }
-    }, [id])
+    }, [id, orgId])
 
+    // Fetch the briefing plus its tasks, scoped by org_id
     async function loadBriefing() {
         const { data } = await supabase
             .from('briefings')
             .select('*, briefing_tasks(*)')
             .eq('id', id)
+            .eq('org_id', orgId)
             .single()
 
         if (data) {
@@ -61,9 +70,12 @@ export default function BriefingEditor() {
         })
     }
 
+    // Save — updates an existing briefing or inserts a new one. Tasks
+    // are replaced wholesale (delete-then-insert) to keep the ordering
+    // deterministic even when rows are reordered or removed.
     async function handleSave(e) {
         e.preventDefault()
-        if (!title.trim()) return
+        if (!title.trim() || !orgId) return
         setSaving(true)
 
         try {
@@ -74,13 +86,14 @@ export default function BriefingEditor() {
                     .from('briefings')
                     .update({ title, body, date })
                     .eq('id', id)
+                    .eq('org_id', orgId)
 
                 // Delete old tasks and re-insert
-                await supabase.from('briefing_tasks').delete().eq('briefing_id', id)
+                await supabase.from('briefing_tasks').delete().eq('briefing_id', id).eq('org_id', orgId)
             } else {
                 const { data, error } = await supabase
                     .from('briefings')
-                    .insert({ title, body, date })
+                    .insert(withOrg(orgId, { title, body, date }))
                     .select()
                     .single()
 
@@ -88,19 +101,18 @@ export default function BriefingEditor() {
                 briefingId = data.id
             }
 
-            // Insert tasks
+            // Insert tasks — each stamped with org_id via withOrg
             if (tasks.length > 0) {
-                await supabase.from('briefing_tasks').insert(
-                    tasks.map((t, i) => ({
-                        briefing_id: briefingId,
-                        description: t.description,
-                        sort_order: i,
-                        is_completed: false
-                    }))
-                )
+                const taskRows = tasks.map((t, i) => ({
+                    briefing_id: briefingId,
+                    description: t.description,
+                    sort_order: i,
+                    is_completed: false
+                }))
+                await supabase.from('briefing_tasks').insert(withOrg(orgId, taskRows))
             }
 
-            navigate('/office/briefings')
+            navigate(briefingsBase)
         } catch (err) {
             console.error('Save error:', err)
             alert('Failed to save briefing')
@@ -116,7 +128,7 @@ export default function BriefingEditor() {
     return (
         <div>
             <div className="page-header">
-                <Link to="/office/briefings" style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>← Back to Briefings</Link>
+                <Link to={briefingsBase} style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-muted)' }}>← Back to Briefings</Link>
                 <h1 className="page-title" style={{ marginTop: 'var(--space-2)' }}>
                     {isEditing ? 'Edit Briefing' : 'New Briefing'}
                 </h1>
@@ -182,7 +194,7 @@ export default function BriefingEditor() {
                     </div>
 
                     <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-5)' }}>
-                        <Link to="/office/briefings" className="btn btn-secondary">Cancel</Link>
+                        <Link to={briefingsBase} className="btn btn-secondary">Cancel</Link>
                         <button type="submit" className="btn btn-primary" disabled={saving || !title.trim()}>
                             {saving ? 'Saving...' : (isEditing ? 'Update Briefing' : 'Create Briefing')}
                         </button>

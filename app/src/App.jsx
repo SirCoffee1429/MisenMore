@@ -41,6 +41,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="recipes" element={<KitchenRecipes />} />
           <Route path="recipes/create" element={<RecipeCreator />} />
+          <Route path="recipes/:id" element={<WorkbookViewer readOnly />} />
           <Route path="briefings" element={<Briefings />} />
           <Route path="events" element={<EventsBanquetsPage readOnly />} />
           <Route path="chat" element={<AiChat />} />

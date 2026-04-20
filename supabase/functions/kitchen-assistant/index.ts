@@ -68,13 +68,15 @@ function getDateWindow(question: string): { from: string; to: string; label: str
 // ─── Sales context builder ────────────────────────────────────────────────────
 async function fetchSalesContext(
   supabase: SupabaseClient,
-  _question: string
+  _question: string,
+  orgId: string
 ): Promise<string> {
   const { from, to, label } = getDateWindow(_question);
 
   const { data, error } = await supabase
     .from("sales_data")
     .select("item_name, units_sold, unit_price, total_revenue, category, report_date")
+    .eq("org_id", orgId)
     .gte("report_date", from)
     .lte("report_date", to)
     .order("report_date", { ascending: false });
@@ -142,11 +144,18 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { question } = await req.json();
+    const { question, org_id: orgId } = await req.json();
 
     if (!question || typeof question !== "string") {
       return new Response(
         JSON.stringify({ error: "Missing 'question' field" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!orgId || typeof orgId !== "string") {
+      return new Response(
+        JSON.stringify({ error: "Missing 'org_id' field" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -162,8 +171,11 @@ Deno.serve(async (req: Request) => {
 
     if (isSalesQuestion(question)) {
       // ── SALES PATH ──────────────────────────────────────────────────────────
+      // NOTE: anon kitchen callers are expected to never hit this path
+      // because RLS blocks sales_data for them. The org-scoped filter here
+      // is still applied so authenticated office callers see only their data.
       console.log("Routing to sales path for question:", question);
-      const salesContext = await fetchSalesContext(supabase, question);
+      const salesContext = await fetchSalesContext(supabase, question, orgId);
 
       systemPrompt = `You are a sharp, data-driven restaurant sales analyst assistant.
 You have access to the restaurant's item-level sales data below. Answer questions accurately using ONLY this data.
@@ -195,15 +207,21 @@ ${salesContext}`;
 
       let context = "";
       if (queryVector) {
+        // match_chunks takes p_org_id — vector search is scoped to this org only
         const { data: chunks, error } = await supabase.rpc("match_chunks", {
           query_embedding: queryVector,
           match_count: 15,
+          p_org_id: orgId,
         });
         if (error) console.error("match_chunks error:", error);
         context = (chunks || []).map((c: { content: string }) => c.content).join("\n\n---\n\n");
       } else {
         console.warn("Embedding failed, falling back to keyword fetch");
-        const { data: chunks } = await supabase.from("workbook_chunks").select("content").limit(50);
+        const { data: chunks } = await supabase
+          .from("workbook_chunks")
+          .select("content")
+          .eq("org_id", orgId)
+          .limit(50);
         context = (chunks || []).map((c: { content: string }) => c.content).join("\n\n---\n\n");
       }
 

@@ -1,13 +1,17 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
+import { useOrg } from '../lib/org/useOrg.js'
 
 import WeatherWidget from '../components/WeatherWidget.jsx'
-import SalesBriefing from '../components/SalesBriefing.jsx'
 import EightySixFeed from '../components/EightySixFeed.jsx'
 
+// Dashboard — kitchen (anon) dashboard. CLAUDE.md forbids any sales or
+// revenue data on this route, so SalesBriefing is intentionally absent
+// here; office/OfficeDashboard is the only place that may render it.
 export default function Dashboard() {
     const navigate = useNavigate()
+    const { orgId, orgSlug } = useOrg()
     const [stats, setStats] = useState({ workbooks: 0, briefings: 0 })
     const [todaysBriefings, setTodaysBriefings] = useState([])
     const [activeIndex, setActiveIndex] = useState(0)
@@ -20,11 +24,13 @@ export default function Dashboard() {
     const latestBriefing = todaysBriefings[activeIndex] || null
 
     useEffect(() => {
+        if (!orgId) return
         async function load() {
+            // All org-scoped counts and lookups run in parallel
             const [wbRes, brRes, latestDateRes] = await Promise.all([
-                supabase.from('workbooks').select('id', { count: 'exact', head: true }),
-                supabase.from('briefings').select('id', { count: 'exact', head: true }),
-                supabase.from('briefings').select('date').order('date', { ascending: false }).limit(1).maybeSingle(),
+                supabase.from('workbooks').select('id', { count: 'exact', head: true }).eq('org_id', orgId),
+                supabase.from('briefings').select('id', { count: 'exact', head: true }).eq('org_id', orgId),
+                supabase.from('briefings').select('date').eq('org_id', orgId).order('date', { ascending: false }).limit(1).maybeSingle(),
             ])
             setStats({
                 workbooks: wbRes.count || 0,
@@ -34,6 +40,7 @@ export default function Dashboard() {
                 const { data: dayBriefings } = await supabase
                     .from('briefings')
                     .select('*')
+                    .eq('org_id', orgId)
                     .eq('date', latestDateRes.data.date)
                     .order('created_at', { ascending: true })
 
@@ -42,25 +49,33 @@ export default function Dashboard() {
             }
         }
         load()
-        supabase.from('banquet_event_orders').select('id', { count: 'exact', head: true }).then(({ count }) => setBeoCount(count || 0))
-    }, [])
+        // Upcoming events count — banquet_event_orders is authenticated-only
+        // per CLAUDE.md, so this will return 0 from anon kitchen. Keep the
+        // tile for parity; the number simply reads as 0 for kitchen.
+        supabase
+            .from('banquet_event_orders')
+            .select('id', { count: 'exact', head: true })
+            .eq('org_id', orgId)
+            .then(({ count }) => setBeoCount(count || 0))
+    }, [orgId])
 
     // Load tasks whenever the active briefing changes
     useEffect(() => {
         async function loadTasks() {
-            if (!latestBriefing) {
+            if (!latestBriefing || !orgId) {
                 setTasks([])
                 return
             }
             const { data: taskData } = await supabase
                 .from('briefing_tasks')
                 .select('*')
+                .eq('org_id', orgId)
                 .eq('briefing_id', latestBriefing.id)
                 .order('sort_order')
             setTasks(taskData || [])
         }
         loadTasks()
-    }, [latestBriefing])
+    }, [latestBriefing, orgId])
 
     // Close settings menu on outside click
     useEffect(() => {
@@ -71,15 +86,17 @@ export default function Dashboard() {
         return () => document.removeEventListener('mousedown', handleClick)
     }, [])
 
+    // Toggle completion on a task. Anon kitchen is allowed UPDATE on
+    // briefing_tasks per CLAUDE.md, but the row must still match org_id.
     async function toggleTask(taskId, isCompleted) {
+        if (!orgId) return
         await supabase
             .from('briefing_tasks')
             .update({ is_completed: !isCompleted })
             .eq('id', taskId)
+            .eq('org_id', orgId)
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, is_completed: !isCompleted } : t))
     }
-
-
 
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 
@@ -111,7 +128,7 @@ export default function Dashboard() {
 
             <div className="dashboard-grid">
                 <WeatherWidget />
-                
+
                 <div className="dash-card morning-notes-card">
                     {todaysBriefings.length > 1 && (
                         <div className="briefing-cycler">
@@ -144,12 +161,11 @@ export default function Dashboard() {
                                     <li>No notes for today.</li>
                                 )}
                             </ul>
-                            <Link to={`/office/briefings/${latestBriefing.id}/edit`} className="btn btn-primary btn-orange mt-auto inline-flex">Edit Notes</Link>
+                            <Link to={`/k/${orgSlug}/briefings`} className="btn btn-primary btn-orange mt-auto inline-flex">View Briefings</Link>
                         </>
                     ) : (
                         <>
                             <div className="notes-list empty">Nothing posted for the crew</div>
-                            <Link to="/office/briefings/new" className="btn btn-primary btn-orange mt-auto inline-flex">Create Briefing</Link>
                         </>
                     )}
                 </div>
@@ -184,9 +200,9 @@ export default function Dashboard() {
                     {latestBriefing && <div className="updated-text">Updated 5m ago</div>}
                 </div>
 
-                <EightySixFeed />
+                <EightySixFeed orgId={orgId} />
 
-                <Link to="/kitchen/events" className="dash-card events-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <Link to={`/k/${orgSlug}/events`} className="dash-card events-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="recipes-top-row">
                         <div className="recipes-icon-box" style={{ background: '#1e3a5f' }}><i className="fa-solid fa-champagne-glasses" /></div>
                         <div className="arrow-top-right"><i className="fa-solid fa-arrow-up-right-from-square" /></div>
@@ -195,9 +211,7 @@ export default function Dashboard() {
                     <div className="recipes-subtitle">Upcoming Events</div>
                 </Link>
 
-                <SalesBriefing />
-
-                <Link to="/kitchen/recipes" className="dash-card active-recipes-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <Link to={`/k/${orgSlug}/recipes`} className="dash-card active-recipes-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                     <div className="recipes-top-row">
                         <div className="recipes-icon-box"><i className="fa-solid fa-book-open" /></div>
                         <div className="arrow-top-right"><i className="fa-solid fa-arrow-up-right-from-square" /></div>

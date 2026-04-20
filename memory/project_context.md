@@ -16,10 +16,10 @@ MisenMore is a universal multi-tenant kitchen and restaurant management platform
 **GitHub:** https://github.com/SirCoffee1429/MisenMore
 **Local path:** C:\MisenMore\Misenmore
 **Supabase project ref:** unqflkmrdfmxtggrcglc, https://unqflkmrdfmxtggrcglc.supabase.co
-**Supabase account:** DIFFERENT account from DailyBrief — MCP cannot access it. All SQL migrations must be run manually in the Supabase dashboard SQL editor.
+**Supabase org:** epbtryuelqfowetkyoot — same org as DailyBrief. **Accessible via the Supabase MCP server.** Phase 2/3 migrations were applied via MCP (apply_migration). Dashboard is only required for auth user creation and auth hook toggles — everything else can go through MCP.
 
 **Tech stack:** React 19 + Vite, React Router v7, Supabase (Postgres + RLS + Edge Functions), Vercel, Google Gemini 3 Flash, Postmark
 
-**Current phase:** Phase 1 — Project Foundation (as of 2026-04-14)
+**Current phase:** Phase 6 closed (org-scoped queries). Phase 7 next (turn on RLS). Phase numbers advance one at a time; each phase is a single commit. See `.claude/changes_made/CHANGES.md` for the definitive log and `prompt.md` in the repo root for the latest session handoff.
 
-**How to apply:** All work in this session is for MisenMore only. DailyBrief is never touched here.
+**How to apply:** All work in this session is for MisenMore only. DailyBrief is never touched here. Before assuming a phase number from this memory, confirm against CHANGES.md — this field lags.

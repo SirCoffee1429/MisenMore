@@ -1,34 +1,32 @@
 import { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
+import { useAuth } from '../lib/auth/useAuth.js'
 import SalesTrendChart from '../components/SalesTrendChart.jsx'
 
+// SalesReports — office-only. CLAUDE.md forbids kitchen from seeing any
+// sales/revenue data, so this route never exists under /k/. Queries are
+// scoped by org_id from JWT claims.
 export default function SalesReports() {
+    const { orgId, orgSlug } = useAuth()
+    const salesBase = `/o/${orgSlug}/sales`
     const [dates, setDates] = useState([])
     const [loading, setLoading] = useState(true)
-    const location = useLocation()
-    
-    // Build the correct base path depending on dashboard context
-    const getBasePath = () => {
-        if (location.pathname.startsWith('/office')) return '/office/sales'
-        return '/kitchen/sales'
-    }
-    const basePath = getBasePath()
 
     useEffect(() => {
+        if (!orgId) return
         async function fetchDates() {
             try {
-                // Fetch distinct dates (we can just fetch all and deduplicate, or use a specific RPC if we had one)
-                // For simplicity, fetch report_date from all items, order by it, and deduplicate in JS.
+                // Fetch every report_date for this org and deduplicate in JS
                 const { data, error } = await supabase
                     .from('sales_data')
                     .select('report_date')
+                    .eq('org_id', orgId)
                     .order('report_date', { ascending: false })
 
                 if (error) throw error
-                
-                // Deduplicate dates
-                const uniqueDates = [...new Set(data.map(item => item.report_date))]
+
+                const uniqueDates = [...new Set((data || []).map(item => item.report_date))]
                 setDates(uniqueDates)
             } catch (err) {
                 console.error("Error fetching sales dates:", err)
@@ -37,18 +35,18 @@ export default function SalesReports() {
             }
         }
         fetchDates()
-    }, [])
+    }, [orgId])
 
     return (
         <div className="card">
             <div className="card-header-row mb-6">
                 <h1 className="page-title"><i className="fa-solid fa-file-invoice-dollar" style={{ color: 'var(--orange)' }} /> Sales Reports</h1>
-                <Link to={basePath.replace('/sales', '')} className="btn btn-secondary">
+                <Link to={`/o/${orgSlug}`} className="btn btn-secondary">
                     <i className="fa-solid fa-arrow-left" /> Back to Dashboard
                 </Link>
             </div>
 
-            <SalesTrendChart />
+            <SalesTrendChart orgId={orgId} />
 
             {loading ? (
                 <div className="shimmer" style={{ height: '200px', borderRadius: 'var(--radius-md)' }}></div>
@@ -67,7 +65,7 @@ export default function SalesReports() {
                             day: 'numeric'
                         })
                         return (
-                            <Link key={date} to={`${basePath}/${date}`} className="dash-card" style={{ textDecoration: 'none', transition: 'var(--transition-fast)' }}
+                            <Link key={date} to={`${salesBase}/${date}`} className="dash-card" style={{ textDecoration: 'none', transition: 'var(--transition-fast)' }}
                                   onMouseOver={(e) => e.currentTarget.style.borderColor = 'var(--orange)'}
                                   onMouseOut={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>

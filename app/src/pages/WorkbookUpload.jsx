@@ -2,9 +2,16 @@ import { useState, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import * as XLSX from 'xlsx'
 import { useCategories } from '../lib/useCategories.js'
+import { useAuth } from '../lib/auth/useAuth.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
+// WorkbookUpload — office-only recipe upload. Every insert (workbooks,
+// workbook_sheets, workbook_chunks) is stamped with org_id via withOrg.
+// The embed-chunks edge function also receives org_id so the generated
+// vector embeddings stay scoped per tenant.
 export default function WorkbookUpload() {
-    const { categories } = useCategories()
+    const { orgId } = useAuth()
+    const { categories } = useCategories(orgId)
     const [files, setFiles] = useState([])
     const [uploading, setUploading] = useState(false)
     const [dragging, setDragging] = useState(false)
@@ -36,7 +43,7 @@ export default function WorkbookUpload() {
     }
 
     async function uploadAll() {
-        if (files.length === 0) return
+        if (files.length === 0 || !orgId) return
         setUploading(true)
 
         for (let i = 0; i < files.length; i++) {
@@ -44,12 +51,13 @@ export default function WorkbookUpload() {
             if (item.status !== 'pending') continue
 
             try {
-                // Check for duplicates first
+                // Duplicate check, scoped to this org
                 setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'checking' } : f))
 
                 const { data: existing } = await supabase
                     .from('workbooks')
                     .select('id')
+                    .eq('org_id', orgId)
                     .eq('file_name', item.name)
                     .maybeSingle()
 
@@ -61,7 +69,7 @@ export default function WorkbookUpload() {
                 // Update status to uploading
                 setFiles(prev => prev.map((f, idx) => idx === i ? { ...f, status: 'uploading' } : f))
 
-                // Upload to Supabase storage
+                // Upload to Supabase storage under a timestamped key
                 const timestamp = Date.now()
                 const storagePath = `${timestamp}_${item.name}`
                 const { error: uploadError } = await supabase.storage
@@ -140,7 +148,7 @@ export default function WorkbookUpload() {
                     }
                 })
 
-                // Determine category from first chunk
+                // Determine category from first chunk (AI classifier)
                 let category = ['Uncategorized']
                 if (chunksToInsert.length > 0) {
                     try {
@@ -158,35 +166,36 @@ export default function WorkbookUpload() {
                     }
                 }
 
-                // Insert workbook record
+                // Insert workbook record — stamped with org_id via withOrg
                 const { data: wbData, error: wbError } = await supabase
                     .from('workbooks')
-                    .insert({
+                    .insert(withOrg(orgId, {
                         file_name: item.name,
                         file_url: urlData.publicUrl,
                         file_size: item.file.size,
                         sheet_count: workbook.SheetNames.length,
                         status: 'parsed',
                         category: category
-                    })
+                    }))
                     .select()
                     .single()
 
                 if (wbError) throw wbError
 
-                // Append workbook id to sheets and chunks
+                // Append workbook id to sheets and chunks, then stamp org_id
                 sheetsToInsert.forEach(s => s.workbook_id = wbData.id)
                 chunksToInsert.forEach(c => c.workbook_id = wbData.id)
 
-
                 if (sheetsToInsert.length > 0) {
-                    await supabase.from('workbook_sheets').insert(sheetsToInsert)
+                    await supabase.from('workbook_sheets').insert(withOrg(orgId, sheetsToInsert))
                 }
                 if (chunksToInsert.length > 0) {
-                    await supabase.from('workbook_chunks').insert(chunksToInsert)
+                    await supabase.from('workbook_chunks').insert(withOrg(orgId, chunksToInsert))
                 }
+                // Fire-and-forget embedding — pass org_id so the edge fn
+                // can scope its own match_chunks calls downstream.
                 supabase.functions.invoke('embed-chunks', {
-                    body: { workbook_id: wbData.id }
+                    body: { workbook_id: wbData.id, org_id: orgId }
                 }).then(({ error }) => {
                     if (error) console.error('Embedding error:', error)
                 })
@@ -201,28 +210,28 @@ export default function WorkbookUpload() {
         setUploading(false)
     }
 
+    // Toggle a category on/off for a just-uploaded workbook. Lookup
+    // falls back to file_name + org_id when the local workbookId is lost.
     async function toggleCategory(index, categoryName) {
+        if (!orgId) return
         let fileItem = files[index]
         let targetId = fileItem.workbookId
 
         let currentCategories = Array.isArray(fileItem.category) ? [...fileItem.category] : [fileItem.category || 'Uncategorized']
 
         if (currentCategories.includes(categoryName)) {
-            // Remove it
             currentCategories = currentCategories.filter(c => c !== categoryName)
-            // If empty, default to Uncategorized
             if (currentCategories.length === 0) currentCategories = ['Uncategorized']
         } else {
-            // Add it and remove 'Uncategorized' if present
             currentCategories.push(categoryName)
             currentCategories = currentCategories.filter(c => c !== 'Uncategorized')
         }
 
-        // If the workbook ID is missing from state (e.g. uploaded before a hot refresh), fetch it.
         if (!targetId) {
             const { data } = await supabase
                 .from('workbooks')
                 .select('id')
+                .eq('org_id', orgId)
                 .eq('file_name', fileItem.name)
                 .maybeSingle()
 
@@ -234,7 +243,6 @@ export default function WorkbookUpload() {
             }
         }
 
-        // Update local state optimistically
         setFiles(prev => prev.map((f, idx) => idx === index ? { ...f, category: currentCategories, workbookId: targetId } : f))
 
         try {
@@ -242,6 +250,7 @@ export default function WorkbookUpload() {
                 .from('workbooks')
                 .update({ category: currentCategories })
                 .eq('id', targetId)
+                .eq('org_id', orgId)
 
             if (error) {
                 console.error('Failed to update categories:', error)
@@ -343,7 +352,7 @@ export default function WorkbookUpload() {
                         <button
                             className="btn btn-primary"
                             onClick={uploadAll}
-                            disabled={uploading || files.every(f => f.status === 'done')}
+                            disabled={uploading || files.every(f => f.status === 'done') || !orgId}
                         >
                             {uploading ? 'Uploading...' : `Upload ${files.filter(f => f.status === 'pending').length} File(s)`}
                         </button>

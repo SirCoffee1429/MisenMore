@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// Resolve the Monday of the week containing `date`, formatted as YYYY-MM-DD
 function getWeekStart(date = new Date()) {
     const d = new Date(date)
     const day = d.getDay()
@@ -12,34 +14,44 @@ function getWeekStart(date = new Date()) {
     return d.toISOString().split('T')[0]
 }
 
+// Day-of-month for the given index offset from a week's Monday
 function getDayDate(weekStart, dayIdx) {
     const d = new Date(weekStart + 'T00:00:00')
     d.setDate(d.getDate() + dayIdx)
     return d.getDate()
 }
 
-export default function WeeklyFeatures() {
+// WeeklyFeatures — lunch/dinner calendar rendered in both kitchen and
+// office dashboards. Receives orgId as a prop from whichever parent
+// resolved it; queries skip when orgId is not yet available.
+export default function WeeklyFeatures({ orgId }) {
     const [weekStart, setWeekStart] = useState(() => getWeekStart())
     const [features, setFeatures] = useState({})
     const [editing, setEditing] = useState(null)
     const [editValue, setEditValue] = useState('')
     const [saving, setSaving] = useState(false)
 
-    useEffect(() => {
-        loadFeatures()
-    }, [weekStart])
-
-    async function loadFeatures() {
+    // Fetch this org's features for the active week
+    const loadFeatures = useCallback(async () => {
+        if (!orgId) {
+            setFeatures({})
+            return
+        }
         const { data } = await supabase
             .from('weekly_features')
             .select('*')
+            .eq('org_id', orgId)
             .eq('week_start', weekStart)
         const map = {}
         ;(data || []).forEach(f => {
             map[`${f.day_of_week}-${f.meal}`] = f
         })
         setFeatures(map)
-    }
+    }, [orgId, weekStart])
+
+    useEffect(() => {
+        loadFeatures()
+    }, [loadFeatures])
 
     function shiftWeek(dir) {
         const d = new Date(weekStart + 'T00:00:00')
@@ -47,33 +59,45 @@ export default function WeeklyFeatures() {
         setWeekStart(d.toISOString().split('T')[0])
     }
 
-    function startEdit(dayIdx, meal) {
-        const key = `${dayIdx}-${meal}`
-        setEditing(key)
-        setEditValue(features[key]?.content || '')
-    }
-
+    // Save edit for a specific day+meal cell. Deletes the row when the
+    // cell is cleared, updates an existing row, or inserts a new one
+    // (stamped with org_id via withOrg).
     async function saveEdit(dayIdx, meal) {
         const key = `${dayIdx}-${meal}`
         const content = editValue.trim()
+        if (!orgId) {
+            setEditing(null)
+            setEditValue('')
+            return
+        }
         setSaving(true)
 
         if (!content) {
             const existing = features[key]
             if (existing) {
-                await supabase.from('weekly_features').delete().eq('id', existing.id)
+                await supabase
+                    .from('weekly_features')
+                    .delete()
+                    .eq('id', existing.id)
+                    .eq('org_id', orgId)
             }
         } else {
             const existing = features[key]
             if (existing) {
-                await supabase.from('weekly_features').update({ content, updated_at: new Date().toISOString() }).eq('id', existing.id)
+                await supabase
+                    .from('weekly_features')
+                    .update({ content, updated_at: new Date().toISOString() })
+                    .eq('id', existing.id)
+                    .eq('org_id', orgId)
             } else {
-                await supabase.from('weekly_features').insert({
-                    week_start: weekStart,
-                    day_of_week: dayIdx,
-                    meal,
-                    content,
-                })
+                await supabase
+                    .from('weekly_features')
+                    .insert(withOrg(orgId, {
+                        week_start: weekStart,
+                        day_of_week: dayIdx,
+                        meal,
+                        content,
+                    }))
             }
         }
 
@@ -83,16 +107,10 @@ export default function WeeklyFeatures() {
         await loadFeatures()
     }
 
-    function handleKeyDown(e, dayIdx, meal) {
-        if (e.key === 'Enter') saveEdit(dayIdx, meal)
-        else if (e.key === 'Escape') setEditing(null)
-    }
-
     // Week label
     const ws = new Date(weekStart + 'T00:00:00')
     const we = new Date(ws)
     we.setDate(we.getDate() + 6)
-    const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     const monthLabel = ws.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
     const isCurrentWeek = weekStart === getWeekStart()
@@ -146,7 +164,7 @@ export default function WeeklyFeatures() {
 
                     return (
                         <div key={`cell-${dayIdx}`} className={`office-v2-cal-cell ${isToday ? 'active' : ''}`}>
-                            
+
                             {/* Lunch */}
                             <div className="office-v2-cal-item">
                                 <span className="office-v2-cal-item-label">Lunch: </span>
@@ -171,7 +189,7 @@ export default function WeeklyFeatures() {
                                         rows={3}
                                     />
                                 ) : (
-                                    <span 
+                                    <span
                                         onClick={() => handleCellClick(lunchKey, lunch?.content)}
                                         style={{ color: '#d1d5db', cursor: 'pointer', whiteSpace: 'pre-wrap', display: 'block', minHeight: '1.5rem', opacity: lunch?.content ? 1 : 0.5 }}
                                     >
@@ -204,7 +222,7 @@ export default function WeeklyFeatures() {
                                         rows={3}
                                     />
                                 ) : (
-                                    <span 
+                                    <span
                                         onClick={() => handleCellClick(dinnerKey, dinner?.content)}
                                         style={{ color: '#d1d5db', cursor: 'pointer', whiteSpace: 'pre-wrap', display: 'block', minHeight: '1.5rem', opacity: dinner?.content ? 1 : 0.5 }}
                                     >

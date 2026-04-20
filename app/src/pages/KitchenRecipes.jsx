@@ -3,10 +3,15 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
 import { formatFileSize } from '../lib/workbooks.js'
 import { useCategories } from '../lib/useCategories.js'
+import { useOrg } from '../lib/org/useOrg.js'
 import EditRecipeContentModal from '../components/EditRecipeContentModal.jsx'
 
+// KitchenRecipes — anon recipe browser. Workbook reads are scoped to
+// the resolved org_id from the URL slug. CLAUDE.md rule 10 requires
+// explicit .eq('org_id', orgId) on every anon query.
 export default function KitchenRecipes() {
-    const { categories, loading: categoriesLoading } = useCategories()
+    const { orgId, orgSlug } = useOrg()
+    const { categories, loading: categoriesLoading } = useCategories(orgId)
     const [workbooks, setWorkbooks] = useState([])
     const [loading, setLoading] = useState(true)
     const [filter, setFilter] = useState('All')
@@ -14,16 +19,18 @@ export default function KitchenRecipes() {
     const [editWorkbook, setEditWorkbook] = useState(null)
 
     useEffect(() => {
+        if (!orgId) return
         async function load() {
             const { data } = await supabase
                 .from('workbooks')
                 .select('*')
+                .eq('org_id', orgId)
                 .order('uploaded_at', { ascending: false })
             setWorkbooks(data || [])
             setLoading(false)
         }
         load()
-    }, [])
+    }, [orgId])
 
     if (loading) {
         return (
@@ -65,7 +72,7 @@ export default function KitchenRecipes() {
                     <h1 className="page-title">Recipes</h1>
                     <p className="page-subtitle">{filteredWorkbooks.length} recipe{filteredWorkbooks.length !== 1 ? 's' : ''} {filter !== 'All' ? `in ${filter}` : 'available'}</p>
                 </div>
-                <Link to="/kitchen/recipes/create" className="btn btn-primary" style={{ background: '#34d399', borderColor: '#34d399' }}>
+                <Link to={`/k/${orgSlug}/recipes/create`} className="btn btn-primary" style={{ background: '#34d399', borderColor: '#34d399' }}>
                     <i className="fa-solid fa-plus" /> Create Recipe
                 </Link>
             </div>
@@ -108,7 +115,7 @@ export default function KitchenRecipes() {
             ) : (
                 <div className="workbook-grid">
                     {filteredWorkbooks.map(wb => (
-                        <Link key={wb.id} to={`/kitchen/recipes/${wb.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                        <Link key={wb.id} to={`/k/${orgSlug}/recipes/${wb.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                             <div className="workbook-card" style={{ position: 'relative' }}>
                                 {/* Pencil edit icon */}
                                 <button
@@ -167,6 +174,7 @@ export default function KitchenRecipes() {
                 isOpen={!!editWorkbook}
                 onClose={() => setEditWorkbook(null)}
                 workbook={editWorkbook}
+                orgId={orgId}
                 onSaved={() => {
                     // Optionally refresh data; for now just close
                 }}

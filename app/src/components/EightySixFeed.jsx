@@ -1,36 +1,48 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
 const ACCENT = '#f87171'
 const ACCENT_BG = 'rgba(248, 113, 113, 0.08)'
 const ACCENT_BORDER = 'rgba(248, 113, 113, 0.2)'
 
-export default function EightySixFeed() {
+// EightySixFeed — 86'd items feed for kitchen crew. Anon CRUD on the
+// 'alerts' category of management_notes. orgId prop is required so the
+// query is explicitly scoped — RLS on anon is limited to alerts-category
+// rows and still requires the org_id match for multi-tenant safety.
+export default function EightySixFeed({ orgId }) {
     const [notes, setNotes] = useState([])
     const [newText, setNewText] = useState('')
     const [posting, setPosting] = useState(false)
 
-    useEffect(() => {
-        loadNotes()
-    }, [])
-
-    async function loadNotes() {
+    // Load all alerts for the active org
+    const loadNotes = useCallback(async () => {
+        if (!orgId) {
+            setNotes([])
+            return
+        }
         const { data } = await supabase
             .from('management_notes')
             .select('*')
+            .eq('org_id', orgId)
             .eq('category', 'alerts')
             .order('pinned', { ascending: false })
             .order('created_at', { ascending: false })
         setNotes(data || [])
-    }
+    }, [orgId])
 
+    useEffect(() => {
+        loadNotes()
+    }, [loadNotes])
+
+    // Post a new 86 alert — stamped with org_id via withOrg
     async function handlePost() {
         const content = newText.trim()
-        if (!content) return
+        if (!content || !orgId) return
         setPosting(true)
         const { error } = await supabase
             .from('management_notes')
-            .insert({ content, author: 'Kitchen', category: 'alerts', pinned: false })
+            .insert(withOrg(orgId, { content, author: 'Kitchen', category: 'alerts', pinned: false }))
         if (!error) {
             setNewText('')
             await loadNotes()
@@ -38,13 +50,17 @@ export default function EightySixFeed() {
         setPosting(false)
     }
 
+    // Delete scoped by id + org_id as belt-and-suspenders
     async function handleDelete(id) {
-        await supabase.from('management_notes').delete().eq('id', id)
+        if (!orgId) return
+        await supabase.from('management_notes').delete().eq('id', id).eq('org_id', orgId)
         setNotes(prev => prev.filter(n => n.id !== id))
     }
 
+    // Toggle pinned state — also org-scoped
     async function togglePin(id, currentPinned) {
-        await supabase.from('management_notes').update({ pinned: !currentPinned }).eq('id', id)
+        if (!orgId) return
+        await supabase.from('management_notes').update({ pinned: !currentPinned }).eq('id', id).eq('org_id', orgId)
         await loadNotes()
     }
 
@@ -130,7 +146,7 @@ export default function EightySixFeed() {
                     className="wb-send-btn"
                     style={{ background: ACCENT }}
                     onClick={handlePost}
-                    disabled={posting || !newText.trim()}
+                    disabled={posting || !newText.trim() || !orgId}
                 >
                     {posting
                         ? <i className="fa-solid fa-spinner fa-spin" />

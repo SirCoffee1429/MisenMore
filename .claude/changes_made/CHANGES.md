@@ -2,6 +2,187 @@
 
 ---
 
+### 2026-04-19 — Phase 6: Org-Scoped Queries
+
+**Type:** `feat`
+**Summary:** Rewrote every Supabase query in the app to be org-scoped.
+Kitchen (anon) queries explicitly `.eq('org_id', orgId)` from the
+URL-slug-resolved `OrgContext`. Office (authenticated) writes pass
+through `withOrg()` from JWT-stamped `orgId` in `AuthContext`. Edge
+functions now accept `org_id` in their payload (or fall back to the
+test org for Postmark inbound webhooks, per the agreed Option C). The
+kitchen `SalesBriefing` card was removed (CLAUDE.md kitchen-data
+boundary). Legacy `/kitchen/*` and `/office/*` inline link references
+left over from DailyBrief were rewritten to the slug-scoped `/k/:orgSlug/*`
+and `/o/:orgSlug/*` paths. Phase 5 only rewrote layouts + the route tree;
+Phase 6 covers the pages themselves.
+
+**New files:**
+- `app/src/lib/useCurrentOrg.js` — resolves the active org for pages
+  mounted in both trees (Briefings, EventsBanquetsPage, RecipeCreator,
+  AiChat, WorkbookViewer). Reads `OrgContext` first (kitchen anon
+  slug resolution), falls back to `AuthContext` (office JWT claims).
+  Returns `{ orgId, orgSlug, loading, error, source }` where `source`
+  is `'org'` or `'auth'` so pages can branch link destinations and
+  write-path eligibility without knowing which shell is hosting them.
+
+**Updated — frontend hooks/helpers:**
+- `app/src/lib/useCategories.js` — accepts `orgId` param. Short-circuits
+  to empty list when orgId is nullish. Every query now
+  `.eq('org_id', orgId)` — no unscoped reads.
+
+**Updated — shared components (all accept `orgId` prop):**
+- `app/src/components/EightySixFeed.jsx` — reads/writes `management_notes`
+  (alerts). All ops scoped by `org_id`; inserts wrap via `withOrg()`.
+- `app/src/components/WeeklyFeatures.jsx` — reads/writes `weekly_features`.
+  All ops scoped; inserts `withOrg()`.
+- `app/src/components/ManagementWhiteboard.jsx` — reads/writes
+  `management_notes`. All ops scoped; inserts `withOrg()`.
+- `app/src/components/SalesBriefing.jsx` — office-only. Hardcoded link
+  now builds `/o/${orgSlug}/sales` from the prop. Reads
+  `sales_data` scoped by `org_id`. Removed `useLocation` branching that
+  referenced legacy `/office` vs `/kitchen` dashboard paths.
+- `app/src/components/SalesTrendChart.jsx` — accepts `orgId` and scopes
+  every `sales_data` fetch.
+- `app/src/components/CategoryManager.jsx` — accepts `orgId`, wraps
+  category inserts with `withOrg()`, scopes category + cascaded
+  workbook updates by `org_id`.
+- `app/src/components/EditRecipeContentModal.jsx` — accepts `orgId`,
+  scopes `workbook_sheets` reads and updates.
+
+**Updated — pages (all queries org-scoped; all writes via `withOrg()`;
+  legacy `/office/*` and `/kitchen/*` Links rewritten to slug-scoped
+  paths built from `orgSlug`):**
+- `app/src/pages/Dashboard.jsx` — kitchen dashboard. Removed
+  `<SalesBriefing />` (CLAUDE.md: kitchen never sees sales). Removed
+  the now-obsolete "Edit Notes" Link (pointed at the office editor),
+  replaced with a "View Briefings" link into the kitchen briefings
+  route. All other links build from `orgSlug` via `useOrg()`. Pass
+  `orgId` to `<EightySixFeed>`. Every query `.eq('org_id', orgId)`.
+- `app/src/pages/OfficeDashboard.jsx` — deleted dead `handleLogout`
+  (DailyBrief sessionStorage; Phase 5 already moved sign-out to the
+  layout via `signOut()` from `AuthContext`). Rewrote all links to
+  `/o/${orgSlug}/...`. "Full View" button for the communication panel
+  now points at the real `/o/${orgSlug}/board` route (DailyBrief's
+  `/office/chat` target never existed in the MisenMore route tree).
+  Passes `orgId` to `<WeeklyFeatures>`, `<ManagementWhiteboard>`,
+  `<SalesTrendChart>`. Counts queries all scoped.
+- `app/src/pages/Briefings.jsx` — dual-context via `useCurrentOrg()`.
+  Office sees new/edit/delete buttons; kitchen is read-only. Link base
+  resolves to `/k/${orgSlug}/briefings` or `/o/${orgSlug}/briefings`
+  based on `source`. Writes org-scoped; task toggle allowed for both
+  shells (kitchen anon has UPDATE on `briefing_tasks` per CLAUDE.md RLS
+  table).
+- `app/src/pages/BriefingEditor.jsx` — office-only. `useAuth()` for
+  orgId/orgSlug. Every insert wraps `withOrg()`. Every
+  update/delete filters by `org_id`.
+- `app/src/pages/History.jsx` — office-only. `useAuth()` for orgId.
+  Briefing lookup scoped by `org_id`.
+- `app/src/pages/KitchenRecipes.jsx` — kitchen-only. `useOrg()`. All
+  workbook reads scoped. Card links now point at `/k/${orgSlug}/recipes/${wb.id}`
+  (see new WorkbookViewer route below). Passes `orgId` to
+  `EditRecipeContentModal`.
+- `app/src/pages/WorkbookLibrary.jsx` — office. `useAuth()` for orgId/
+  orgSlug. All reads/writes scoped. Links rewritten. `<CategoryManager>`
+  gets `orgId` prop.
+- `app/src/pages/WorkbookUpload.jsx` — office. `useAuth()` for orgId.
+  Duplicate check, workbook insert, sheet/chunk inserts, update-category
+  all scoped. `embed-chunks` invocation now passes `org_id` so the
+  downstream function can stamp and scope.
+- `app/src/pages/WorkbookViewer.jsx` — dual-context. `useCurrentOrg()`
+  resolves orgId + backlink base. Supports a new `readOnly` prop so
+  kitchen shows the recipe but hides the category selector. Workbook
+  and sheet fetches scoped by `org_id`. Back link built from `orgSlug`.
+- `app/src/pages/RecipeCreator.jsx` — dual-context. `useCurrentOrg()`.
+  Inserts for `workbooks`, `workbook_sheets`, `workbook_chunks` all via
+  `withOrg()`. `embed-chunks` invocation passes `org_id`. Backlink
+  resolves by `source`.
+- `app/src/pages/SalesReports.jsx` — office. `useAuth()` for orgId/
+  orgSlug. Dropped the legacy `/kitchen/sales` branch (kitchen never
+  sees sales per CLAUDE.md — the branch was dead code). Rewrote back
+  button and date links to `/o/${orgSlug}/...`. `sales_data` read
+  scoped.
+- `app/src/pages/SalesReportDetail.jsx` — same treatment: office-only,
+  scoped reads, rewritten links.
+- `app/src/pages/EventsBanquetsPage.jsx` — dual-context via
+  `useCurrentOrg()`. Kitchen variant (readOnly) skips the
+  `banquet_event_orders` query entirely (anon has zero RLS policy on
+  that table per CLAUDE.md — explicit guard avoids a guaranteed
+  forbidden response). Office variant: every write via `withOrg()`,
+  every delete/update filters by `org_id`. Back link resolves by
+  `readOnly`. `process-beo` invocation now passes `org_id`.
+- `app/src/pages/AiChat.jsx` — `useCurrentOrg()`. Passes `org_id` to
+  the `kitchen-assistant` edge function so RAG retrieval
+  (`match_chunks`) stays scoped per org.
+- `app/src/pages/ManagementBoardPage.jsx` — office-only. `useAuth()`
+  for orgId; forwards it to `<ManagementWhiteboard>`.
+
+**Updated — App router:**
+- `app/src/App.jsx` — added `<Route path="recipes/:id" element={<WorkbookViewer readOnly />}>`
+  under `/k/:orgSlug`. KitchenRecipes linked to a non-existent target
+  in Phase 5; this adds the matching read-only recipe detail view for
+  kitchen crew.
+
+**Updated — edge functions (every domain-table write now stamps
+`org_id`; every read that could return rows across tenants is
+explicitly scoped):**
+- `supabase/functions/kitchen-assistant/index.ts` — accepts `org_id`
+  in request body. Sales path scopes `sales_data` by `org_id`. RAG
+  path passes `p_org_id` to the `match_chunks` RPC. Keyword-fallback
+  fetch scopes `workbook_chunks` by `org_id`.
+- `supabase/functions/embed-chunks/index.ts` — accepts `org_id`.
+  Pending-chunk fetch filters by `workbook_id` AND `org_id` (service
+  role bypasses RLS, so this is the only safety net against a
+  cross-tenant `workbook_id` slipping in). Per-chunk update also
+  scoped.
+- `supabase/functions/process-sales-data/index.ts` — Postmark inbound
+  webhook. Option C applied: stamp every row with `TEST_ORG_ID` (env
+  var with a fallback to the test org UUID) until per-org Postmark
+  routing is introduced in Phase 8. Deduplication delete now also
+  scoped by `org_id` so a resent email can't clobber another tenant's
+  rows in the future multi-tenant state.
+- `supabase/functions/process-banquets/index.ts` — same Option C
+  treatment; `upcoming_banquets` rows stamped with `TEST_ORG_ID`.
+- `supabase/functions/process-beo/index.ts` — now accepts `org_id`
+  from the dashboard upload payload (JSON or multipart) and stamps
+  every `banquet_event_orders` insert. Returns 400 if missing — no
+  implicit fallback since this function is only invoked from the
+  authenticated dashboard, never from Postmark.
+
+**Verification:**
+- `vite build --mode development` — 123 modules, zero errors, clean
+  compile. Ran twice (once mid-work, once at end); both clean.
+- Every page that reads org-scoped data now early-returns until
+  `orgId` resolves, so refresh on `/k/:orgSlug/*` shows a "loading"
+  state rather than firing an unscoped query against a half-populated
+  context.
+- Spot-check grep: every `supabase.from(...)` in `app/src/` is
+  followed by either an `eq('org_id', ...)`, a `withOrg(...)` wrapped
+  insert, or is a write whose filter chain includes `.eq('org_id', ...)`.
+
+**Followups (not Phase 6 scope):**
+- **Postmark multi-tenant routing** — `TEST_ORG_ID` in
+  `process-sales-data` and `process-banquets` is a deliberate
+  temporary hack per the agreed Option C. Phase 8 must introduce
+  per-org inbound addresses or a From-address → org_id mapping
+  table before the first real org is provisioned.
+- **Supabase Storage keys are not org-prefixed.** `WorkbookUpload`
+  still writes `${timestamp}_${filename}` to the `workbooks` bucket.
+  Storage RLS is a Phase 7+ concern; the row-level `org_id` on
+  `workbooks` is sufficient for the current access-via-public-URL
+  pattern.
+- **`banquet_event_orders.completed` column** — referenced by
+  `EventsBanquetsPage` but never confirmed in the Phase 2 migration.
+  If advisor flags it, Phase 7 RLS migration is the right place to
+  add it.
+
+**Next:** Phase 7 — RLS policies on every domain table. Authenticated
+users get full CRUD only for rows matching `current_org_id()`; anon
+gets the CLAUDE.md-defined read subset plus the two explicit write
+exceptions (`briefing_tasks` UPDATE, `management_notes` alerts CRUD).
+
+---
+
 ### 2026-04-18 — Phase 5: Route Structure
 
 **Type:** `feat`

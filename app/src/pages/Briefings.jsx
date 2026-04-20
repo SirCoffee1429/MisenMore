@@ -1,32 +1,47 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
+import { useCurrentOrg } from '../lib/useCurrentOrg.js'
 
+// Briefings — list view mounted in both kitchen (read-only) and office
+// (full CRUD) route trees. source tells us which shell is active so
+// Link destinations and the new-briefing button target the right path.
 export default function Briefings() {
+    const { orgId, orgSlug, source } = useCurrentOrg()
+    const isOffice = source === 'auth'
+    const briefingsBase = isOffice
+        ? `/o/${orgSlug}/briefings`
+        : `/k/${orgSlug}/briefings`
+
     const [briefings, setBriefings] = useState([])
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
+        if (!orgId) return
         loadBriefings()
-    }, [])
+    }, [orgId])
 
-    // Fetch all briefings ordered by date descending
+    // Fetch this org's briefings with nested tasks, ordered by date desc
     async function loadBriefings() {
         setLoading(true)
         const { data } = await supabase
             .from('briefings')
             .select('*, briefing_tasks(*)')
+            .eq('org_id', orgId)
             .order('date', { ascending: false })
         setBriefings(data || [])
         setLoading(false)
     }
 
-    // Toggle a task's completion state
+    // Toggle a task's completion — scoped by org_id even though id alone
+    // is unique, as defense-in-depth before Phase 7 RLS lands.
     async function toggleTask(taskId, isCompleted) {
+        if (!orgId) return
         await supabase
             .from('briefing_tasks')
             .update({ is_completed: !isCompleted })
             .eq('id', taskId)
+            .eq('org_id', orgId)
 
         setBriefings(prev =>
             prev.map(b => ({
@@ -38,10 +53,11 @@ export default function Briefings() {
         )
     }
 
-    // Delete a briefing by ID
+    // Delete a briefing — office only. Kitchen users never see this button.
     async function deleteBriefing(id) {
+        if (!orgId) return
         if (!confirm('Delete this briefing?')) return
-        await supabase.from('briefings').delete().eq('id', id)
+        await supabase.from('briefings').delete().eq('id', id).eq('org_id', orgId)
         setBriefings(prev => prev.filter(b => b.id !== id))
     }
 
@@ -56,16 +72,20 @@ export default function Briefings() {
                     <h1 className="page-title">Briefings</h1>
                     <p className="page-subtitle">Shift notes and tasks for the crew</p>
                 </div>
-                <Link to="/office/briefings/new" className="btn btn-primary">📋 New Briefing</Link>
+                {isOffice && (
+                    <Link to={`${briefingsBase}/new`} className="btn btn-primary">📋 New Briefing</Link>
+                )}
             </div>
 
             {briefings.length === 0 ? (
                 <div className="empty-state">
                     <div className="empty-state-icon">📋</div>
-                    <div className="empty-state-text">No briefings yet. Create one for the crew.</div>
-                    <Link to="/office/briefings/new" className="btn btn-primary" style={{ marginTop: 'var(--space-5)' }}>
-                        📋 Create Briefing
-                    </Link>
+                    <div className="empty-state-text">No briefings yet.{isOffice ? ' Create one for the crew.' : ''}</div>
+                    {isOffice && (
+                        <Link to={`${briefingsBase}/new`} className="btn btn-primary" style={{ marginTop: 'var(--space-5)' }}>
+                            📋 Create Briefing
+                        </Link>
+                    )}
                 </div>
             ) : (
                 <div className="briefing-list">
@@ -78,10 +98,12 @@ export default function Briefings() {
                                     </div>
                                     <div className="briefing-card-title">{b.title}</div>
                                 </div>
-                                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                                    <Link to={`/office/briefings/${b.id}/edit`} className="btn btn-sm btn-secondary">✏️ Edit</Link>
-                                    <button className="btn btn-sm btn-danger" onClick={() => deleteBriefing(b.id)}>🗑</button>
-                                </div>
+                                {isOffice && (
+                                    <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                                        <Link to={`${briefingsBase}/${b.id}/edit`} className="btn btn-sm btn-secondary">✏️ Edit</Link>
+                                        <button className="btn btn-sm btn-danger" onClick={() => deleteBriefing(b.id)}>🗑</button>
+                                    </div>
+                                )}
                             </div>
 
                             {b.body && <div className="briefing-card-body">{b.body}</div>}

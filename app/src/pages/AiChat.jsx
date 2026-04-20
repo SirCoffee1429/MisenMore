@@ -2,8 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
 import useVoiceInput, { isVoiceSupported } from '../lib/useVoiceInput.js'
+import { useCurrentOrg } from '../lib/useCurrentOrg.js'
 
+// AiChat — mounted in both route trees. orgId is forwarded to the
+// kitchen-assistant edge function so RAG retrieval (match_chunks) only
+// considers the active org's workbook_chunks.
 export default function AiChat() {
+    const { orgId } = useCurrentOrg()
     const [messages, setMessages] = useState([
         { role: 'assistant', text: 'Hey Chef! 👋 I\'ve got all your recipes loaded up. Ask me anything — ingredients, quantities, procedures, you name it.' }
     ])
@@ -18,7 +23,7 @@ export default function AiChat() {
     // Voice input
     const handleVoiceResult = useCallback((text) => {
         if (text) submitQuestion(text)
-    }, [])
+    }, [orgId])
 
     const { isListening, transcript, error: voiceError, startListening, stopListening } = useVoiceInput({
         onResult: handleVoiceResult,
@@ -29,21 +34,21 @@ export default function AiChat() {
     }, [messages])
 
     useEffect(() => {
-        if (initialQuery && !hasProcessedInitialQuery.current) {
+        if (initialQuery && !hasProcessedInitialQuery.current && orgId) {
             hasProcessedInitialQuery.current = true
             submitQuestion(initialQuery)
         }
-    }, [initialQuery])
+    }, [initialQuery, orgId])
 
     async function submitQuestion(question) {
-        if (!question || loading) return
+        if (!question || loading || !orgId) return
 
         setMessages(prev => [...prev, { role: 'user', text: question }])
         setLoading(true)
 
         try {
             const { data, error } = await supabase.functions.invoke('kitchen-assistant', {
-                body: { question },
+                body: { question, org_id: orgId },
             })
 
             if (error) throw error

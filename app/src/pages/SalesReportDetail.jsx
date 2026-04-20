@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link, useLocation } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
+import { useAuth } from '../lib/auth/useAuth.js'
 
 const CATEGORY_COLORS = [
     '#f97316', // orange
@@ -13,25 +14,23 @@ const CATEGORY_COLORS = [
     '#ec4899', // pink
 ]
 
+// SalesReportDetail — office-only. Shows top sellers for a single date,
+// scoped to the authenticated manager's org.
 export default function SalesReportDetail() {
     const { date } = useParams()
-    const location = useLocation()
+    const { orgId, orgSlug } = useAuth()
+    const salesBase = `/o/${orgSlug}/sales`
     const [salesItems, setSalesItems] = useState([])
     const [loading, setLoading] = useState(true)
 
-    // Build the correct back-link path depending on dashboard context
-    const getBasePath = () => {
-        if (location.pathname.startsWith('/office')) return '/office/sales'
-        return '/kitchen/sales'
-    }
-    const basePath = getBasePath()
-
     useEffect(() => {
+        if (!orgId || !date) return
         async function fetchSalesData() {
             try {
                 const { data, error } = await supabase
                     .from('sales_data')
                     .select('*')
+                    .eq('org_id', orgId)
                     .eq('report_date', date)
                     .order('units_sold', { ascending: false })
 
@@ -43,9 +42,8 @@ export default function SalesReportDetail() {
                 setLoading(false)
             }
         }
-
-        if (date) fetchSalesData()
-    }, [date])
+        fetchSalesData()
+    }, [date, orgId])
 
     if (loading) {
         return (
@@ -62,7 +60,7 @@ export default function SalesReportDetail() {
         year: 'numeric'
     })
 
-    // Filter out fries
+    // Filter out fries (noise items not meaningful for prep focus)
     const filteredItems = salesItems.filter(item => {
         const name = item.item_name.toLowerCase();
         return name !== 'house cut fries' && name !== 'sweet potato fries';
@@ -99,7 +97,7 @@ export default function SalesReportDetail() {
                     <h1 className="page-title"><i className="fa-solid fa-fire-flame-curved" style={{ color: 'var(--orange)' }} /> {formattedDate}</h1>
                     <div style={{ color: 'var(--text-muted)', marginTop: 'var(--space-1)' }}>Prep Focus: Top Sellers</div>
                 </div>
-                <Link to={basePath} className="btn btn-secondary">
+                <Link to={salesBase} className="btn btn-secondary">
                     <i className="fa-solid fa-arrow-left" /> Back to Dates
                 </Link>
             </div>
@@ -115,7 +113,7 @@ export default function SalesReportDetail() {
                             Top Selling Items (Volume)
                         </h2>
                         <div className="sr-top-list">
-                            {topSellers.map((item, idx) => (
+                            {topSellers.map((item) => (
                                 <div key={item.id} className="sr-top-item">
                                     <div className="sr-top-row">
                                         <span className="sr-item-name">{item.item_name}</span>

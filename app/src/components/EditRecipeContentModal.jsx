@@ -89,7 +89,7 @@ function rebuildRows(originalRows, ingredients, assembly) {
     return rows
 }
 
-export default function EditRecipeContentModal({ isOpen, onClose, workbook, onSaved }) {
+export default function EditRecipeContentModal({ isOpen, onClose, workbook, orgId, onSaved }) {
     const [sheets, setSheets] = useState([])
     const [activeSheet, setActiveSheet] = useState(0)
     const [ingredients, setIngredients] = useState([])
@@ -98,14 +98,16 @@ export default function EditRecipeContentModal({ isOpen, onClose, workbook, onSa
     const [saving, setSaving] = useState(false)
 
     useEffect(() => {
-        if (!isOpen || !workbook) return
+        if (!isOpen || !workbook || !orgId) return
 
         async function loadSheets() {
             setLoading(true)
+            // Scope sheet lookup by org_id as defense-in-depth
             const { data } = await supabase
                 .from('workbook_sheets')
                 .select('*')
                 .eq('workbook_id', workbook.id)
+                .eq('org_id', orgId)
                 .order('sheet_index')
 
             setSheets(data || [])
@@ -119,7 +121,7 @@ export default function EditRecipeContentModal({ isOpen, onClose, workbook, onSa
         }
 
         loadSheets()
-    }, [isOpen, workbook])
+    }, [isOpen, workbook, orgId])
 
     function handleSheetChange(index) {
         setActiveSheet(index)
@@ -149,7 +151,7 @@ export default function EditRecipeContentModal({ isOpen, onClose, workbook, onSa
 
     async function handleSave() {
         const sheet = sheets[activeSheet]
-        if (!sheet) return
+        if (!sheet || !orgId) return
 
         setSaving(true)
 
@@ -159,6 +161,7 @@ export default function EditRecipeContentModal({ isOpen, onClose, workbook, onSa
             .from('workbook_sheets')
             .update({ rows: newRows })
             .eq('id', sheet.id)
+            .eq('org_id', orgId)
 
         if (error) {
             console.error('Error saving recipe:', error)

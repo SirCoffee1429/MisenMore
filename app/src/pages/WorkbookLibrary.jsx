@@ -3,11 +3,18 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
 import { formatFileSize } from '../lib/workbooks.js'
 import { useCategories } from '../lib/useCategories.js'
+import { useAuth } from '../lib/auth/useAuth.js'
 import CategoryManager from '../components/CategoryManager.jsx'
 import EditRecipeModal from '../components/EditRecipeModal.jsx'
 
+// WorkbookLibrary — office recipe management. Every read and write is
+// scoped by org_id from JWT claims. CategoryManager also receives orgId
+// so it can stamp new categories and scope its category-rename updates.
 export default function WorkbookLibrary() {
-    const { categories, loading: categoriesLoading, refetch: refetchCategories } = useCategories()
+    const { orgId, orgSlug } = useAuth()
+    const workbooksBase = `/o/${orgSlug}/workbooks`
+
+    const { categories, loading: categoriesLoading, refetch: refetchCategories } = useCategories(orgId)
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
     const [workbooks, setWorkbooks] = useState([])
     const [loading, setLoading] = useState(true)
@@ -16,30 +23,37 @@ export default function WorkbookLibrary() {
     const [editingWorkbook, setEditingWorkbook] = useState(null)
 
     useEffect(() => {
+        if (!orgId) return
         async function load() {
             const { data } = await supabase
                 .from('workbooks')
                 .select('*')
+                .eq('org_id', orgId)
                 .order('uploaded_at', { ascending: false })
             setWorkbooks(data || [])
             setLoading(false)
         }
         load()
-    }, [])
+    }, [orgId])
 
+    // Delete a workbook — scoped by org_id
     async function deleteWorkbook(id, e) {
         e.preventDefault()
         e.stopPropagation()
+        if (!orgId) return
         if (!confirm('Delete this recipe and all its data?')) return
-        await supabase.from('workbooks').delete().eq('id', id)
+        await supabase.from('workbooks').delete().eq('id', id).eq('org_id', orgId)
         setWorkbooks(prev => prev.filter(w => w.id !== id))
     }
 
+    // Update a workbook's name and categories — scoped by org_id
     async function updateWorkbook(id, newName, newCategories) {
+        if (!orgId) return
         const { error } = await supabase
             .from('workbooks')
             .update({ file_name: newName, category: JSON.stringify(newCategories) })
             .eq('id', id)
+            .eq('org_id', orgId)
 
         if (!error) {
             setWorkbooks(prev => prev.map(w =>
@@ -50,8 +64,6 @@ export default function WorkbookLibrary() {
             alert("Failed to save changes.")
         }
     }
-
-
 
     if (loading) {
         return (
@@ -98,10 +110,10 @@ export default function WorkbookLibrary() {
                     <button onClick={() => setIsCategoryModalOpen(true)} className="btn btn-secondary">
                         <i className="fa-solid fa-list" /> Manage Categories
                     </button>
-                    <Link to="/office/workbooks/create" className="btn btn-primary" style={{ background: '#34d399', borderColor: '#34d399' }}>
+                    <Link to={`${workbooksBase}/create`} className="btn btn-primary" style={{ background: '#34d399', borderColor: '#34d399' }}>
                         <i className="fa-solid fa-plus" /> Create
                     </Link>
-                    <Link to="/office/workbooks/upload" className="btn btn-primary">📤 Upload</Link>
+                    <Link to={`${workbooksBase}/upload`} className="btn btn-primary">📤 Upload</Link>
                 </div>
             </div>
 
@@ -140,7 +152,7 @@ export default function WorkbookLibrary() {
                     <div className="empty-state-icon">📁</div>
                     <div className="empty-state-text">No recipes found in this category.</div>
                     {filter === 'All' && (
-                        <Link to="/office/workbooks/upload" className="btn btn-primary" style={{ marginTop: 'var(--space-5)' }}>
+                        <Link to={`${workbooksBase}/upload`} className="btn btn-primary" style={{ marginTop: 'var(--space-5)' }}>
                             📤 Upload Recipes
                         </Link>
                     )}
@@ -148,7 +160,7 @@ export default function WorkbookLibrary() {
             ) : (
                 <div className="workbook-grid">
                     {filteredWorkbooks.map(wb => (
-                        <Link key={wb.id} to={`/office/workbooks/${wb.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                        <Link key={wb.id} to={`${workbooksBase}/${wb.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                             <div className="workbook-card" style={{ position: 'relative' }}>
                                 <div style={{ position: 'absolute', top: 'var(--space-3)', right: 'var(--space-3)', display: 'flex', gap: 'var(--space-1)', zIndex: 10 }}>
                                     <button className="btn btn-sm btn-secondary" onClick={(e) => {
@@ -208,6 +220,7 @@ export default function WorkbookLibrary() {
                 onClose={() => setIsCategoryModalOpen(false)}
                 categories={categories}
                 refetchCategories={refetchCategories}
+                orgId={orgId}
             />
 
             <EditRecipeModal

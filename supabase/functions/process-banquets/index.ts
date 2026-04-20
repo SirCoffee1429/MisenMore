@@ -7,6 +7,12 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
+// TODO(Phase 8): multi-tenant Postmark routing. Today every inbound
+// banquet email is stamped to this single test org. Before the first
+// real org is provisioned, replace this with a From-address → org_id
+// lookup. Tracked against Phase 6 option (c).
+const TEST_ORG_ID = Deno.env.get("TEST_ORG_ID") || "cbc0aaeb-b1b3-489e-849d-0d0e1fe09b9e";
+
 Deno.serve(async (req) => {
   try {
     // 1. Get the payload from Postmark
@@ -149,13 +155,15 @@ Deno.serve(async (req) => {
         });
     }
 
-    // 4. Save to Supabase
+    // 4. Save to Supabase — stamped to TEST_ORG_ID pending Phase 8 routing
+    const orgId = TEST_ORG_ID;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { error } = await supabase
       .from("upcoming_banquets")
       .insert(
         parsedData.map((item: Record<string, string | number>) => ({
+          org_id: orgId,
           event_date: item.event_date || new Date().toISOString().split("T")[0],
           event_name: item.event_name || 'Unknown Event',
           start_time: item.start_time || null,

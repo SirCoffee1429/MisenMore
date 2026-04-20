@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
+import { useCurrentOrg } from '../lib/useCurrentOrg.js'
+import { withOrg } from '../lib/org/withOrg.js'
 
+// EventsBanquetsPage — mounted in both trees. Kitchen variant (readOnly)
+// only shows event names/dates; office variant allows BEO upload, note
+// posting, and BEO management. Anon has zero access to
+// banquet_event_orders per CLAUDE.md — the read silently returns empty
+// for kitchen via RLS + explicit filter.
 export default function EventsBanquetsPage({ readOnly = false }) {
+    const { orgId, orgSlug, source } = useCurrentOrg()
+    const isOffice = source === 'auth'
+    const backLink = readOnly ? `/k/${orgSlug}` : `/o/${orgSlug}`
+
     const [notes, setNotes] = useState([])
     const [banquets, setBanquets] = useState([])
     const [beos, setBeos] = useState([])
@@ -17,53 +28,63 @@ export default function EventsBanquetsPage({ readOnly = false }) {
     const accentBorder = 'rgba(96, 165, 250, 0.2)'
 
     useEffect(() => {
+        if (!orgId) return
         loadNotes()
         loadBanquets()
-        loadBEOS()
-    }, [])
+        if (isOffice) {
+            // Kitchen anon has no access to banquet_event_orders — skip the query
+            loadBEOS()
+        }
+    }, [orgId, isOffice])
 
+    // Event coordination notes — only office sees this column
     async function loadNotes() {
         const { data } = await supabase
             .from('management_notes')
             .select('*')
+            .eq('org_id', orgId)
             .eq('category', 'events')
             .order('pinned', { ascending: false })
             .order('created_at', { ascending: false })
         setNotes(data || [])
     }
 
+    // Upcoming banquet summary — readable by kitchen via RLS view
     async function loadBanquets() {
         try {
             const { data } = await supabase
                 .from('upcoming_banquets')
                 .select('*')
+                .eq('org_id', orgId)
                 .gte('event_date', new Date().toISOString().split('T')[0])
                 .order('event_date', { ascending: true })
             setBanquets(data || [])
-        } catch(err) {
-            console.error('Error fetching banquets', err);
+        } catch (err) {
+            console.error('Error fetching banquets', err)
         } finally {
             setLoadingBanquets(false)
         }
     }
 
+    // Banquet event orders — office-only, never exposed to kitchen
     async function loadBEOS() {
         const { data } = await supabase
             .from('banquet_event_orders')
             .select('*')
+            .eq('org_id', orgId)
             .order('event_date', { ascending: true })
         setBeos(data || [])
     }
 
     async function handlePost() {
         const content = newText.trim()
-        if (!content) return
+        if (!content || !orgId) return
         setPosting(true)
         const author = authorName.trim() || 'Manager'
         localStorage.setItem('mgmt_author', author)
         const { error } = await supabase
             .from('management_notes')
-            .insert({ content, author, category: 'events', pinned: false })
+            .insert(withOrg(orgId, { content, author, category: 'events', pinned: false }))
         if (!error) {
             setNewText('')
             await loadNotes()
@@ -72,56 +93,63 @@ export default function EventsBanquetsPage({ readOnly = false }) {
     }
 
     async function handleDelete(id) {
-        await supabase.from('management_notes').delete().eq('id', id)
+        if (!orgId) return
+        await supabase.from('management_notes').delete().eq('id', id).eq('org_id', orgId)
         setNotes(prev => prev.filter(n => n.id !== id))
     }
 
+    // Upload a BEO PDF — process-beo edge fn receives org_id so the
+    // parsed row is stamped for the correct tenant.
     async function handleBEOUpload(e) {
-        const file = e.target.files?.[0];
-        if (!file) return;
+        const file = e.target.files?.[0]
+        if (!file || !orgId) return
 
-        setUploadingBEO(true);
+        setUploadingBEO(true)
         try {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
+            const reader = new FileReader()
+            reader.readAsDataURL(file)
             reader.onload = async () => {
-                const base64 = reader.result.split(',')[1];
-                const { data, error } = await supabase.functions.invoke('process-beo', {
-                    body: { pdfBase64: base64 }
-                });
+                const base64 = reader.result.split(',')[1]
+                const { error } = await supabase.functions.invoke('process-beo', {
+                    body: { pdfBase64: base64, org_id: orgId }
+                })
 
-                if (error) throw error;
-                await loadBEOS();
-                alert("BEO Parsed Successfully!");
-            };
+                if (error) throw error
+                await loadBEOS()
+                alert("BEO Parsed Successfully!")
+            }
         } catch (err) {
-            console.error("Error uploading BEO:", err);
-            alert("Failed to parse BEO. Check console for details.");
+            console.error("Error uploading BEO:", err)
+            alert("Failed to parse BEO. Check console for details.")
         } finally {
-            setUploadingBEO(false);
+            setUploadingBEO(false)
         }
     }
 
     async function togglePin(id, currentPinned) {
-        await supabase.from('management_notes').update({ pinned: !currentPinned }).eq('id', id)
+        if (!orgId) return
+        await supabase.from('management_notes').update({ pinned: !currentPinned }).eq('id', id).eq('org_id', orgId)
         await loadNotes()
     }
 
     async function handleDeleteBEO(id) {
-        await supabase.from('banquet_event_orders').delete().eq('id', id)
+        if (!orgId) return
+        await supabase.from('banquet_event_orders').delete().eq('id', id).eq('org_id', orgId)
         setBeos(prev => prev.filter(b => b.id !== id))
     }
 
     async function handleClearAllBEOs() {
+        if (!orgId) return
         if (!confirm('Are you sure you want to clear all BEOs? This cannot be undone.')) return
         const ids = beos.map(b => b.id)
-        await supabase.from('banquet_event_orders').delete().in('id', ids)
+        await supabase.from('banquet_event_orders').delete().in('id', ids).eq('org_id', orgId)
         setBeos([])
     }
 
     async function toggleBEOComplete(id, currentCompleted) {
+        if (!orgId) return
         const newVal = !currentCompleted
-        await supabase.from('banquet_event_orders').update({ completed: newVal }).eq('id', id)
+        await supabase.from('banquet_event_orders').update({ completed: newVal }).eq('id', id).eq('org_id', orgId)
         setBeos(prev => prev.map(b => b.id === id ? { ...b, completed: newVal } : b))
     }
 
@@ -158,30 +186,28 @@ export default function EventsBanquetsPage({ readOnly = false }) {
                             <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleBEOUpload} disabled={uploadingBEO} />
                         </label>
                     )}
-                    <Link to={readOnly ? '/kitchen' : '/office'} className="btn btn-secondary btn-sm"><i className="fa-solid fa-arrow-left" /> Back</Link>
+                    <Link to={backLink} className="btn btn-secondary btn-sm"><i className="fa-solid fa-arrow-left" /> Back</Link>
                 </div>
             </header>
 
             <div style={{ display: 'grid', gridTemplateColumns: readOnly ? '1fr' : 'minmax(0, 1fr) 300px', gap: 'var(--space-6)', alignItems: 'start' }}>
-                
+
                 {/* Left Panel: Parsed upcoming banquets & BEOs */}
                 <div className="card-column" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                    
-                    {/* BEO Details Card */}
-                    {beos.length > 0 && (
+
+                    {/* BEO Details Card — office only */}
+                    {!readOnly && beos.length > 0 && (
                         <div className="card">
                             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <h2 className="card-title"><i className="fa-solid fa-file-invoice" style={{ color: '#3b82f6', marginRight: '8px' }}/> Banquet Event Orders</h2>
-                                {!readOnly && (
-                                    <button
-                                        className="btn btn-secondary btn-sm"
-                                        style={{ fontSize: 'var(--font-size-xs)', color: '#f87171', borderColor: 'rgba(248,113,113,0.3)' }}
-                                        onClick={handleClearAllBEOs}
-                                        title="Clear all BEOs"
-                                    >
-                                        <i className="fa-solid fa-trash-can" /> Clear All
-                                    </button>
-                                )}
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ fontSize: 'var(--font-size-xs)', color: '#f87171', borderColor: 'rgba(248,113,113,0.3)' }}
+                                    onClick={handleClearAllBEOs}
+                                    title="Clear all BEOs"
+                                >
+                                    <i className="fa-solid fa-trash-can" /> Clear All
+                                </button>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', padding: 'var(--space-4)' }}>
                                 {beos.map(b => (
@@ -199,15 +225,13 @@ export default function EventsBanquetsPage({ readOnly = false }) {
                                     >
                                         {/* Event Header Row */}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: 'var(--space-3)' }}>
-                                            {!readOnly && (
-                                                <input
-                                                    type="checkbox"
-                                                    className="beo-check"
-                                                    checked={!!b.completed}
-                                                    onChange={() => toggleBEOComplete(b.id, b.completed)}
-                                                    title={b.completed ? 'Mark incomplete' : 'Mark complete'}
-                                                />
-                                            )}
+                                            <input
+                                                type="checkbox"
+                                                className="beo-check"
+                                                checked={!!b.completed}
+                                                onChange={() => toggleBEOComplete(b.id, b.completed)}
+                                                title={b.completed ? 'Mark incomplete' : 'Mark complete'}
+                                            />
                                             <div style={{ flex: 1 }}>
                                                 <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.01em' }}>
                                                     {b.event_name}
@@ -224,16 +248,14 @@ export default function EventsBanquetsPage({ readOnly = false }) {
                                                     )}
                                                 </div>
                                             </div>
-                                            {!readOnly && (
-                                                <button
-                                                    className="wb-act-btn wb-act-delete"
-                                                    onClick={() => handleDeleteBEO(b.id)}
-                                                    title="Delete this BEO"
-                                                    style={{ fontSize: '0.9rem', flexShrink: 0 }}
-                                                >
-                                                    <i className="fa-solid fa-xmark" />
-                                                </button>
-                                            )}
+                                            <button
+                                                className="wb-act-btn wb-act-delete"
+                                                onClick={() => handleDeleteBEO(b.id)}
+                                                title="Delete this BEO"
+                                                style={{ fontSize: '0.9rem', flexShrink: 0 }}
+                                            >
+                                                <i className="fa-solid fa-xmark" />
+                                            </button>
                                         </div>
 
                                         {/* Food Items */}
@@ -310,7 +332,7 @@ export default function EventsBanquetsPage({ readOnly = false }) {
                     </div>
                 </div>
 
-                {/* Right Panel: Single Whiteboard Column for coordination */}
+                {/* Right Panel: Single Whiteboard Column for coordination — office only */}
                 {!readOnly && (
                 <div className="wb-column" style={{ background: 'var(--bg-card)', padding: 'var(--space-4)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)' }}>
                     <div className="wb-author-bar" style={{ marginBottom: 'var(--space-4)' }}>
@@ -394,7 +416,7 @@ export default function EventsBanquetsPage({ readOnly = false }) {
                                 className="wb-send-btn"
                                 style={{ background: accent }}
                                 onClick={handlePost}
-                                disabled={posting || !newText.trim()}
+                                disabled={posting || !newText.trim() || !orgId}
                             >
                                 {posting
                                     ? <i className="fa-solid fa-spinner fa-spin" />
