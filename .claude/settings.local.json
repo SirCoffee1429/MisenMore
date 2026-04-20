@@ -5,7 +5,8 @@
       "Bash(echo \"robocopy exit=$?\")",
       "Bash(robocopy \"C:/Old Hawthorne Projects/DailyBrief/supabase/functions\" \"C:/MisenMore/Misenmore/supabase/functions\" //E //NFL //NDL //NP)",
       "Bash(cp \"C:/Old Hawthorne Projects/DailyBrief/supabase/config.toml\" \"C:/MisenMore/Misenmore/supabase/config.toml\")",
-      "mcp__claude_ai_Supabase__apply_migration"
+      "mcp__claude_ai_Supabase__apply_migration",
+      "mcp__claude_ai_Supabase__execute_sql"
     ]
   }
 }

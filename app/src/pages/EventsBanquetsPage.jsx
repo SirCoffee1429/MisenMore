@@ -49,11 +49,18 @@ export default function EventsBanquetsPage({ readOnly = false }) {
         setNotes(data || [])
     }
 
-    // Upcoming banquet summary — readable by kitchen via RLS view
+    // Upcoming banquet summary. Two paths:
+    //   - Kitchen (anon): reads the kitchen_upcoming_events view, which
+    //     projects safe columns only (no `notes`). Anon has zero RLS policy
+    //     on the underlying upcoming_banquets table.
+    //   - Office (authenticated): reads upcoming_banquets directly so RLS
+    //     enforces org isolation at the DB level (the view is owner-rights
+    //     and does not apply RLS on the underlying table).
     async function loadBanquets() {
         try {
+            const source = readOnly ? 'kitchen_upcoming_events' : 'upcoming_banquets'
             const { data } = await supabase
-                .from('upcoming_banquets')
+                .from(source)
                 .select('*')
                 .eq('org_id', orgId)
                 .gte('event_date', new Date().toISOString().split('T')[0])

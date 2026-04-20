@@ -2,6 +2,123 @@
 
 ---
 
+### 2026-04-20 — Phase 7: RLS Policies
+
+**Type:** `feat`
+**Summary:** Turned on Row-Level Security on all 11 domain tables and
+locked down every policy. Phase 6 moved every app-side query to be
+org-scoped; Phase 7 enforces that at the database layer. Authenticated
+users get full CRUD only on rows matching `current_org_id()`. Anon
+(kitchen) gets the CLAUDE.md-defined read subset plus the two explicit
+write exceptions (`briefing_tasks` UPDATE, `management_notes` CRUD
+filtered to `category = 'alerts'`). `sales_data`,
+`banquet_event_orders`, `workbook_chunks`, and `upcoming_banquets` have
+no anon policies — implicit deny. Cross-tenant isolation verified via
+scripted SQL with a throwaway second test org (`test-org-b`) that was
+torn down at phase end.
+
+**New files:**
+- `supabase/migrations/20260420000000_phase7_rls_policies.sql` — single
+  migration containing: `enable row level security` on 11 tables, 44
+  authenticated policies (4 per table, all gated on
+  `org_id = public.current_org_id()`), 12 anon policies per the
+  allowlist, `kitchen_upcoming_events` view + grants to anon and
+  authenticated
+- `supabase/migrations/20260420000100_revert_kitchen_upcoming_events_hardening.sql`
+  — documents and reverts a failed defense-in-depth attempt (see
+  "Followups" below). Leaves the view owner-rights, consistent with the
+  original plan
+
+**Updated files:**
+- `app/src/pages/EventsBanquetsPage.jsx` — `loadBanquets()` now branches
+  on `readOnly`: kitchen (anon) reads from `kitchen_upcoming_events`
+  view (projects safe columns only, omitting `notes`); office
+  (authenticated) continues to read `upcoming_banquets` directly so RLS
+  enforces org isolation at the table level. Both paths retain the
+  `.eq('org_id', orgId)` filter
+
+**Verification:**
+- `mcp.apply_migration` on `20260420000000_phase7_rls_policies` returned
+  success; `pg_tables.rowsecurity` confirms RLS on for all 11 tables;
+  `pg_policies` query confirms correct policy counts per table
+  (banquet_event_orders=4, briefings=5, briefing_tasks=6,
+  management_notes=8, etc.)
+- Seeded one row per target table for both `test-org` and `test-org-b`,
+  with distinct labels like `ORG_A wedding` / `ORG_B banquet`, so a
+  cross-tenant leak would be visible in query output
+- **Anon scripted verification** — 13 checks, all pass:
+  - Allowed SELECTs return expected row counts on `briefings`,
+    `briefing_tasks`, `management_notes` (alerts only), `workbooks`,
+    `workbook_sheets`, `recipe_categories`, `weekly_features`,
+    `kitchen_upcoming_events`
+  - Denied SELECTs return 0 rows on `sales_data`,
+    `banquet_event_orders`, `workbook_chunks`, direct
+    `upcoming_banquets`, `management_notes` where `category = 'comms'`
+  - Anon INSERT into `management_notes` with `category = 'comms'`
+    rejected with `42501` (WITH CHECK)
+  - Anon UPDATE of a non-alerts row matches 0 rows (USING filter)
+  - Anon UPDATE that tries to flip an alert row into comms rejected
+    with `42501` (WITH CHECK)
+- **Authenticated user A (org `test-org`)** — 9 checks, all pass:
+  `current_org_id()` returns the correct UUID; all table SELECTs
+  return only ORG_A-labeled rows; `organizations` returns only
+  `test-org`
+- **Authenticated user B (org `test-org-b`)** — 9 checks, all pass:
+  symmetric to user A; only ORG_B rows visible; cannot see
+  `test-org` in `organizations`
+- **Cross-tenant write boundary tests** (user A targeting ORG_B rows):
+  - UPDATE of ORG_B briefing id → 0 rows affected (USING filter)
+  - DELETE of ORG_B briefing id → 0 rows affected (USING filter)
+  - INSERT with `org_id = ORG_B_uuid` → rejected with `42501`
+    (WITH CHECK)
+  - Post-attack read (as user B): ORG_B briefing title is untouched
+- **Build** — `vite build` 123 modules, zero errors
+- `get_advisors` post-migration: remaining items are expected, see
+  Followups
+
+**Teardown:**
+- `test-org-b`, both test-labeled row sets (ids starting `aaaa0`/`bbbb0`)
+  deleted. Only `test-org` + its one user remain, as before Phase 7
+
+**Followups (not Phase 7 scope):**
+- **`security_definer_view` ERROR on `kitchen_upcoming_events`** — the
+  Supabase advisor flags the view as high-severity because it isn't
+  `security_invoker = true`. We attempted a hardening migration to set
+  invoker semantics + revoke column-level SELECT on `notes` from anon.
+  Both pieces were undermined by Supabase's default ACL on the `public`
+  schema (default_privileges owned by `supabase_admin` grants anon a
+  full-table SELECT that overrides column-level revokes per Postgres
+  privilege hierarchy — empirically verified: anon could still read
+  `notes` post-revoke). The revert migration restored the owner-rights
+  model. Per CLAUDE.md rule 10, kitchen anon cross-tenant isolation is
+  app-side (`.eq('org_id', orgId)`) by design — the same contract as
+  briefings / workbooks / weekly_features. Authenticated cross-tenant
+  isolation is enforced on `upcoming_banquets` directly and the office
+  code path does not hit the view. Consider revisiting in Phase 8 with
+  a proper column-grant-based approach that fights the default ACL, or
+  with per-org inbound Postmark addresses that obviate the notes-hiding
+  requirement entirely
+- **`rls_policy_always_true` WARN on `briefing_tasks` anon UPDATE** —
+  intentional. Anon has UPDATE access so kitchen crew can toggle task
+  completion. Per CLAUDE.md the only write-paths anon has are this one
+  and the `management_notes` alerts CRUD; both rely on app-side org
+  scoping. The advisor warning is a known-good
+- **`rls_enabled_no_policy` INFO on `org_members`** — deferred to Phase
+  8 with the admin panel (per our Q2 decision this session). Adding a
+  policy now would be writing code with no consumer
+- **`auth_leaked_password_protection` WARN** — unrelated Supabase Auth
+  setting. Worth enabling during Phase 8 pre-launch hardening
+- **`extension_in_public` WARN on `vector`** — unchanged from Phase 2
+- **Postmark `TEST_ORG_ID` hardcode** — still Phase 8 blocker per the
+  Phase 6 entry. No change this phase
+
+**Next:** Phase 8 — Admin tooling + first real org provisioning. Move
+Postmark edge functions off `TEST_ORG_ID` to real per-org routing.
+Provision the first commercial org. Add an admin panel for org
+management and an `org_members` policy pair to support it.
+
+---
+
 ### 2026-04-19 — Phase 6: Org-Scoped Queries
 
 **Type:** `feat`

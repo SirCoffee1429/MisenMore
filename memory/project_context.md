@@ -20,6 +20,6 @@ MisenMore is a universal multi-tenant kitchen and restaurant management platform
 
 **Tech stack:** React 19 + Vite, React Router v7, Supabase (Postgres + RLS + Edge Functions), Vercel, Google Gemini 3 Flash, Postmark
 
-**Current phase:** Phase 6 closed (org-scoped queries). Phase 7 next (turn on RLS). Phase numbers advance one at a time; each phase is a single commit. See `.claude/changes_made/CHANGES.md` for the definitive log and `prompt.md` in the repo root for the latest session handoff.
+**Current phase:** Phase 7 closed (RLS live on all 11 domain tables, cross-tenant isolation SQL-verified). Phase 8 next (admin tooling, Postmark per-org routing, first real org provisioning). Phase numbers advance one at a time; each phase is a single commit. See `.claude/changes_made/CHANGES.md` for the definitive log and `prompt.md` in the repo root for the latest session handoff.
 
 **How to apply:** All work in this session is for MisenMore only. DailyBrief is never touched here. Before assuming a phase number from this memory, confirm against CHANGES.md — this field lags.
