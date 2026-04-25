@@ -23,9 +23,8 @@ architectural fix needs to land before the next planned major phase. Phase 7.5
 real org) because multi-tenant anon must be locked down before provisioning org
 #2.
 
-**Why:** Ryan ends sessions with: "write a prompt/summary of everything
-completed in this session into prompt.md. I will be ending this session."
-CHANGES.md is permanent history; prompt.md is the handoff.
+**Why:** Ryan ends sessions with"ending this session." CHANGES.md is permanent
+history; prompt.md is the handoff.
 
 **How to apply:**
 
