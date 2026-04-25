@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './lib/auth/AuthContext.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
+import AdminRoute from './components/AdminRoute.jsx'
 import OrgResolver from './components/OrgResolver.jsx'
 import Login from './pages/Login.jsx'
 import RoleSelect from './pages/RoleSelect.jsx'
@@ -21,6 +22,7 @@ import SalesReportDetail from './pages/SalesReportDetail.jsx'
 import EventsBanquetsPage from './pages/EventsBanquetsPage.jsx'
 import RecipeCreator from './pages/RecipeCreator.jsx'
 import ManagementBoardPage from './pages/ManagementBoardPage.jsx'
+import AdminPanel from './pages/AdminPanel.jsx'
 
 export default function App() {
   return (
@@ -28,6 +30,16 @@ export default function App() {
       <Routes>
         <Route path="/" element={<RoleSelect />} />
         <Route path="/login" element={<Login />} />
+
+        {/* Platform admin — gated by is_platform_admin JWT claim */}
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <AdminPanel />
+            </AdminRoute>
+          }
+        />
 
         {/* Kitchen routes — anonymous, org resolved from URL slug */}
         <Route

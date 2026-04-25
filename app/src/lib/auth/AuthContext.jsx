@@ -26,8 +26,10 @@ function decodeJwtPayload(token) {
   }
 }
 
-// Pulls the three claims the hook stamps. Returns nulls when the user
-// exists but has no org_members row (graceful no-op path from Phase 3).
+// Pulls the four claims the hook stamps. org_id/slug/role are nullable
+// when a user has no org_members row (e.g. a platform admin who has not
+// joined any org). is_platform_admin defaults to false rather than null
+// so callers can treat it as a plain boolean without ?? coalescing.
 export function readOrgClaims(session) {
   const claims = decodeJwtPayload(session?.access_token)
   const meta = claims?.app_metadata ?? {}
@@ -35,6 +37,7 @@ export function readOrgClaims(session) {
     orgId: meta.org_id ?? null,
     orgSlug: meta.org_slug ?? null,
     role: meta.role ?? null,
+    isPlatformAdmin: meta.is_platform_admin === true,
   }
 }
 
@@ -66,13 +69,14 @@ export function AuthProvider({ children }) {
   }, [])
 
   const value = useMemo(() => {
-    const { orgId, orgSlug, role } = readOrgClaims(session)
+    const { orgId, orgSlug, role, isPlatformAdmin } = readOrgClaims(session)
     return {
       session,
       user: session?.user ?? null,
       orgId,
       orgSlug,
       role,
+      isPlatformAdmin,
       loading,
       // signIn — surfaces the Supabase response so Login.jsx can branch on
       // error vs. success and read the freshly-stamped org_slug claim

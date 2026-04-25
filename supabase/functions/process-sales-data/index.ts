@@ -7,18 +7,58 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-// TODO(Phase 8): multi-tenant Postmark routing. Today every inbound
-// Postmark sales email is stamped to this single test org. Before the
-// first real org is provisioned, replace this with a From-address →
-// org_id lookup (e.g. a `postmark_inbound_map` table, or per-org
-// Postmark inbound addresses). Tracked against Phase 6 option (c).
-const TEST_ORG_ID = Deno.env.get("TEST_ORG_ID") || "cbc0aaeb-b1b3-489e-849d-0d0e1fe09b9e";
+// Resolve the inbound routing key from a Postmark payload. Postmark
+// parses `local+key@domain` and exposes the suffix as MailboxHash on
+// each ToFull entry; we prefer that and fall back to a manual parse of
+// the To header so this still works if the parser is ever bypassed.
+function extractInboundKey(payload: {
+  ToFull?: Array<{ MailboxHash?: string; Email?: string }>;
+  To?: string;
+}): string | null {
+  const fromHash = payload.ToFull?.find((t) => t.MailboxHash)?.MailboxHash;
+  if (fromHash) return fromHash.trim().toLowerCase();
+
+  const to = payload.To || "";
+  const match = to.match(/\+([^@]+)@/);
+  return match ? match[1].trim().toLowerCase() : null;
+}
 
 Deno.serve(async (req) => {
   try {
-    // 1. Get the payload from Postmark
     const payload = await req.json();
-    console.log("Received Postmark payload from:", payload.From);
+    console.log("Received Postmark payload from:", payload.From, "to:", payload.To);
+
+    // Resolve the org from the inbound routing key BEFORE any expensive
+    // work — if we can't route it, fail fast.
+    const inboundKey = extractInboundKey(payload);
+    if (!inboundKey) {
+      console.warn("No MailboxHash / +key found on inbound address; cannot route to an org.");
+      return new Response(JSON.stringify({ error: "Missing inbound routing key" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const { data: orgRow, error: orgErr } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("inbound_email_key", inboundKey)
+      .maybeSingle();
+
+    if (orgErr) {
+      console.error("Org lookup failed:", orgErr);
+      throw orgErr;
+    }
+    if (!orgRow) {
+      console.warn(`Inbound key '${inboundKey}' did not match any org.`);
+      return new Response(JSON.stringify({ error: "Unknown inbound key" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const orgId: string = orgRow.id;
 
     const attachment = payload.Attachments?.find((a: { ContentType: string; Name: string; Content: string }) =>
       a.ContentType === "application/pdf" || a.Name.toLowerCase().endsWith(".pdf")
@@ -29,17 +69,15 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ message: "No PDF found" }), { status: 200 });
     }
 
-    // 2. Extract PDF content (Base64)
     const pdfBase64 = attachment.Content;
     console.log(`Found PDF: ${attachment.Name}, size: ${attachment.Content.length} chars base64`);
 
-    // 3. Ask Gemini to parse the PDF
     const prompt = `
       You are an expert at parsing restaurant sales reports.
       Attached is a PDF. You must first determine if this is an "Item Sales Report" or something else entirely (like a "Banquet Event Order").
-      
+
       Look closely at the document title and headers. If it says "Banquet Event Order" or "BEO", or if it describes a private event with guest counts and event times, it is NOT a sales report.
-      
+
       Return ONLY a JSON object with exactly three keys:
       1. "is_valid_sales_report": (boolean) true if this is an Item Sales Report, false if it is a Banquet Event Order or something else.
       2. "report_date": The date of this report in YYYY-MM-DD format. Look in the header, title, footer, or anywhere on the page for a date. If you cannot find any date, use null.
@@ -109,7 +147,6 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ message: "Ignored non-sales report" }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
-    // Extract date from Gemini response, fall back to today (UTC) if not found
     const reportDate: string = parsedData.report_date
       || new Date().toISOString().split("T")[0];
     const items: {
@@ -123,22 +160,16 @@ Deno.serve(async (req) => {
       category: string;
     }[] = parsedData.items || [];
 
-    console.log(`Gemini parsed ${items.length} items from the PDF, report date: ${reportDate}`);
+    console.log(`Gemini parsed ${items.length} items for org ${orgId}, report date: ${reportDate}`);
 
     if (items.length === 0) {
       console.warn("Gemini returned 0 items — check PDF or prompt");
       return new Response(JSON.stringify({ message: "0 items found" }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 
-    // 4. Save to Supabase — every row scoped to TEST_ORG_ID pending
-    //    the Phase 8 Postmark multi-tenancy work.
-    const orgId = TEST_ORG_ID;
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    // Delete existing rows for this org + date + source so a resent email
-    // doesn't double-insert. Scoping by org_id is critical — otherwise a
-    // future multi-tenant deployment would clobber another org's rows
-    // that share the same date + From address.
+    // Idempotency: clear prior rows for this org+date+source so a resent
+    // email doesn't double-insert. org_id is part of the key — never
+    // delete across orgs even if From/date collide.
     const { error: deleteError } = await supabase
       .from("sales_data")
       .delete()
@@ -148,7 +179,6 @@ Deno.serve(async (req) => {
 
     if (deleteError) {
        console.error("Supabase delete error:", deleteError);
-       // we proceed anyway just in case it's a minor RLS issue, but with service role it shouldn't be
     }
 
     const { error } = await supabase
@@ -174,9 +204,9 @@ Deno.serve(async (req) => {
       throw error;
     }
 
-    console.log(`Successfully saved ${items.length} items to sales_data for ${reportDate}`);
+    console.log(`Successfully saved ${items.length} items to sales_data for org ${orgId} on ${reportDate}`);
 
-    return new Response(JSON.stringify({ success: true, count: items.length, report_date: reportDate }), {
+    return new Response(JSON.stringify({ success: true, count: items.length, report_date: reportDate, org_id: orgId }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });

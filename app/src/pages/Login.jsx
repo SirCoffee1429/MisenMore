@@ -9,7 +9,7 @@ import { readOrgClaims } from '../lib/auth/AuthContext.jsx'
 // org_members row, the hook returns app_metadata without org_slug —
 // surfaced here as the "account not provisioned" error state.
 export default function Login() {
-  const { signIn, session, orgSlug, loading } = useAuth()
+  const { signIn, session, orgSlug, isPlatformAdmin, loading } = useAuth()
   const navigate = useNavigate()
 
   const [email, setEmail] = useState('')
@@ -17,13 +17,18 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
-  // Already-signed-in visitors get bounced straight to their org. Covers
-  // refreshes on /login when a session is already in localStorage.
+  // Already-signed-in visitors get bounced. Platform admins land on
+  // /admin even without an org membership; org members go straight to
+  // their org. Covers refreshes on /login when a session is already in
+  // localStorage.
   useEffect(() => {
-    if (!loading && session && orgSlug) {
+    if (loading || !session) return
+    if (orgSlug) {
       navigate(`/o/${orgSlug}`, { replace: true })
+    } else if (isPlatformAdmin) {
+      navigate('/admin', { replace: true })
     }
-  }, [loading, session, orgSlug, navigate])
+  }, [loading, session, orgSlug, isPlatformAdmin, navigate])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -35,12 +40,16 @@ export default function Login() {
         setError(signInError.message)
         return
       }
-      const { orgSlug: slug } = readOrgClaims(data?.session)
-      if (!slug) {
-        setError('Account not provisioned — no organization is linked to this user.')
+      const { orgSlug: slug, isPlatformAdmin: admin } = readOrgClaims(data?.session)
+      if (slug) {
+        navigate(`/o/${slug}`, { replace: true })
         return
       }
-      navigate(`/o/${slug}`, { replace: true })
+      if (admin) {
+        navigate('/admin', { replace: true })
+        return
+      }
+      setError('Account not provisioned — no organization is linked to this user.')
     } finally {
       setSubmitting(false)
     }

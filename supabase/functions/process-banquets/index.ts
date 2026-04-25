@@ -7,17 +7,58 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-// TODO(Phase 8): multi-tenant Postmark routing. Today every inbound
-// banquet email is stamped to this single test org. Before the first
-// real org is provisioned, replace this with a From-address → org_id
-// lookup. Tracked against Phase 6 option (c).
-const TEST_ORG_ID = Deno.env.get("TEST_ORG_ID") || "cbc0aaeb-b1b3-489e-849d-0d0e1fe09b9e";
+// Resolve the inbound routing key from a Postmark payload. Postmark
+// parses `local+key@domain` and exposes the suffix as MailboxHash on
+// each ToFull entry; we prefer that and fall back to a manual parse of
+// the To header so this still works if the parser is ever bypassed.
+function extractInboundKey(payload: {
+  ToFull?: Array<{ MailboxHash?: string; Email?: string }>;
+  To?: string;
+}): string | null {
+  const fromHash = payload.ToFull?.find((t) => t.MailboxHash)?.MailboxHash;
+  if (fromHash) return fromHash.trim().toLowerCase();
+
+  const to = payload.To || "";
+  const match = to.match(/\+([^@]+)@/);
+  return match ? match[1].trim().toLowerCase() : null;
+}
 
 Deno.serve(async (req) => {
   try {
-    // 1. Get the payload from Postmark
     const payload = await req.json();
-    console.log("Received Postmark payload from:", payload.From);
+    console.log("Received Postmark payload from:", payload.From, "to:", payload.To);
+
+    // Resolve the org from the inbound routing key BEFORE any expensive
+    // work — if we can't route it, fail fast.
+    const inboundKey = extractInboundKey(payload);
+    if (!inboundKey) {
+      console.warn("No MailboxHash / +key found on inbound address; cannot route to an org.");
+      return new Response(JSON.stringify({ error: "Missing inbound routing key" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const { data: orgRow, error: orgErr } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("inbound_email_key", inboundKey)
+      .maybeSingle();
+
+    if (orgErr) {
+      console.error("Org lookup failed:", orgErr);
+      throw orgErr;
+    }
+    if (!orgRow) {
+      console.warn(`Inbound key '${inboundKey}' did not match any org.`);
+      return new Response(JSON.stringify({ error: "Unknown inbound key" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const orgId: string = orgRow.id;
 
     const attachment = payload.Attachments?.find((a: { ContentType: string; Name: string; Content: string }) =>
       a.ContentType === "application/pdf" || a.Name.toLowerCase().endsWith(".pdf")
@@ -32,25 +73,24 @@ Deno.serve(async (req) => {
       console.log("No PDF attachment found. Searching for ReserveCloud links in email body...");
       const textBody = payload.TextBody || "";
       const htmlBody = payload.HtmlBody || "";
-      
+
       const urlRegex = /https?:\/\/[^\s"'<>]+/ig;
       const textUrls = textBody.match(urlRegex) || [];
       const htmlUrls = htmlBody.match(urlRegex) || [];
       const allUrls = [...textUrls, ...htmlUrls];
-      
-      const reserveCloudUrl = allUrls.find(u => u.toLowerCase().includes('reservecloud'));
-      
+
+      const reserveCloudUrl = allUrls.find((u: string) => u.toLowerCase().includes('reservecloud'));
+
       if (!reserveCloudUrl) {
           console.log("No PDF attachment or ReserveCloud URL found in payload.");
           return new Response(JSON.stringify({ message: "No PDF or link found" }), { status: 200 });
       }
 
       console.log("Found ReserveCloud link:", reserveCloudUrl);
-      
-      // Fetch the page
+
       const pageRes = await fetch(reserveCloudUrl);
       if (!pageRes.ok) throw new Error("Failed to fetch ReserveCloud page: " + pageRes.statusText);
-      
+
       const contentType = pageRes.headers.get("content-type") || "";
       if (contentType.includes("application/pdf")) {
           const arrayBuffer = await pageRes.arrayBuffer();
@@ -59,15 +99,12 @@ Deno.serve(async (req) => {
           for (let i = 0; i < bytes.byteLength; i++) binaryStr += String.fromCharCode(bytes[i]);
           pdfBase64 = btoa(binaryStr);
       } else {
-          // Parse HTML for PDF link
           const htmlText = await pageRes.text();
-          // Look for an href ending in .pdf or wrapping a document
           const pdfLinkMatch = htmlText.match(/href=["']([^"']+\.pdf[^"']*)["']/i);
           let pdfUrl = "";
           if (pdfLinkMatch) {
               pdfUrl = pdfLinkMatch[1];
           } else {
-              // try to find any link containing download or report
               const fallbackMatch = htmlText.match(/href=["']([^"']*(download|report)[^"']*)["']/i);
               if (fallbackMatch) pdfUrl = fallbackMatch[1];
           }
@@ -76,7 +113,6 @@ Deno.serve(async (req) => {
                throw new Error("Could not find a PDF link within the ReserveCloud HTML page.");
           }
 
-          // Resolve relative URLs
           if (pdfUrl.startsWith("/")) {
               const urlObj = new URL(reserveCloudUrl);
               pdfUrl = urlObj.origin + pdfUrl;
@@ -85,7 +121,7 @@ Deno.serve(async (req) => {
           console.log("Found inner PDF link:", pdfUrl);
           const pdfRes = await fetch(pdfUrl);
           if (!pdfRes.ok) throw new Error("Failed to fetch inner PDF: " + pdfRes.statusText);
-          
+
           const arrayBuffer = await pdfRes.arrayBuffer();
           const bytes = new Uint8Array(arrayBuffer);
           let binaryStr = '';
@@ -96,19 +132,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 3. Ask Gemini to parse the PDF
     const prompt = `
-      You are an expert at parsing restaurant and country club Banquet/Event reports. 
-      Attached is a PDF of "Upcoming in Banquets". 
-      Please extract all upcoming events. 
-      Return ONLY a JSON array of objects with these exact keys: 
-      "event_date" (the date of the event in YYYY-MM-DD format), 
+      You are an expert at parsing restaurant and country club Banquet/Event reports.
+      Attached is a PDF of "Upcoming in Banquets".
+      Please extract all upcoming events.
+      Return ONLY a JSON array of objects with these exact keys:
+      "event_date" (the date of the event in YYYY-MM-DD format),
       "event_name" (the name or title of the event/banquet),
       "start_time" (the start time, e.g. "5:00 PM", or empty string if not found),
       "location" (the room, block, or venue location),
       "guest_count" (number of attendees as an integer),
       "event_type" (the type of event or category, e.g. "Dinner", "Meeting", "Wedding").
-      
+
       Ignore header lines, footers, or unassociated text. If a field is missing on a record, return an empty string or 0 for counts.
       Order the output chronologically by event_date, then start_time.
     `;
@@ -146,7 +181,7 @@ Deno.serve(async (req) => {
     const geminiData = await geminiRes.json();
     const rawOutput = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
     const parsedData = JSON.parse(rawOutput);
-    console.log(`Gemini parsed ${parsedData.length} banquets/events from the PDF`);
+    console.log(`Gemini parsed ${parsedData.length} banquets/events for org ${orgId}`);
 
     if (parsedData.length === 0) {
         return new Response(JSON.stringify({ success: true, count: 0, message: "No banquets found" }), {
@@ -154,10 +189,6 @@ Deno.serve(async (req) => {
             headers: { "Content-Type": "application/json" },
         });
     }
-
-    // 4. Save to Supabase — stamped to TEST_ORG_ID pending Phase 8 routing
-    const orgId = TEST_ORG_ID;
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { error } = await supabase
       .from("upcoming_banquets")
@@ -178,9 +209,9 @@ Deno.serve(async (req) => {
       throw error;
     }
 
-    console.log(`Successfully saved ${parsedData.length} records to upcoming_banquets`);
+    console.log(`Successfully saved ${parsedData.length} records to upcoming_banquets for org ${orgId}`);
 
-    return new Response(JSON.stringify({ success: true, count: parsedData.length }), {
+    return new Response(JSON.stringify({ success: true, count: parsedData.length, org_id: orgId }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
