@@ -23,20 +23,19 @@ multi-tenancy could be built in from day one without migration complexity.
 **GitHub:** https://github.com/SirCoffee1429/MisenMore **Local path:**
 C:\MisenMore\Misenmore **Supabase project ref:** unqflkmrdfmxtggrcglc,
 https://unqflkmrdfmxtggrcglc.supabase.co **Supabase org:** epbtryuelqfowetkyoot
-— same org as DailyBrief. **Accessible via the Supabase MCP server.** Phase 2/3
-migrations were applied via MCP (apply_migration). Dashboard is only required
-for auth user creation and auth hook toggles — everything else can go through
-MCP.
+— same org as DailyBrief. **Accessible via the Supabase MCP server.** Phase
+2/3/7 migrations were applied via MCP (apply_migration). Dashboard is only
+required for auth user creation, auth hook toggles, and enabling Anonymous
+Sign-Ins (required for Phase 7.5).
 
 **Tech stack:** React 19 + Vite, React Router v7, Supabase (Postgres + RLS +
 Edge Functions), Vercel, Google Gemini 3 Flash, Postmark
 
-**Current phase:** Phase 7 closed (RLS live on all 11 domain tables,
-cross-tenant isolation SQL-verified). Phase 8 next (admin tooling, Postmark
-per-org routing, first real org provisioning). Phase numbers advance one at a
-time; each phase is a single commit. See `.claude/changes_made/CHANGES.md` for
-the definitive log and `prompt.md` in the repo root for the latest session
-handoff.
+**Current phase:** Phase 7 closed (RLS live on all 11 domain tables). Phase 7.5
+is the next planned commit — anon kitchen JWT hardening (replaces raw-anon-key
+access with signInAnonymously + signed JWT carrying org_id, rewrites every anon
+RLS policy to scope on current_org_id() instead of `using (true)`). Phase 8
+follows (admin panel + Postmark per-org routing + first real org provisioning).
 
 **How to apply:** All work in this session is for MisenMore only. DailyBrief is
 never touched here. Before assuming a phase number from this memory, confirm

@@ -4,17 +4,45 @@ description: Column-level REVOKE SELECT on anon is silently overridden by Supaba
 type: project
 ---
 
-Phase 7 attempted to hide the `notes` column of `upcoming_banquets` from anon with `revoke select (notes) on public.upcoming_banquets from anon`. The revoke ran without error but had **no effect** — anon could still `select notes from upcoming_banquets`.
+Phase 7 attempted to hide the `notes` column of `upcoming_banquets` from anon
+with `revoke select (notes) on public.upcoming_banquets from anon`. The revoke
+ran without error but had **no effect** — anon could still
+`select notes from upcoming_banquets`.
 
-**Root cause:** Supabase's `public` schema has `default_privileges` entries owned by `supabase_admin` that grant `arwdDxtm` (all privileges including full-table SELECT) on every table in `public` to `anon`, `authenticated`, and `service_role`. Postgres privilege hierarchy: if a role has table-level SELECT, column-level revokes are ignored. Column-level revoke can only restrict columns if the role does NOT already have table-level SELECT.
+**Root cause:** Supabase's `public` schema has `default_privileges` entries
+owned by `supabase_admin` that grant `arwdDxtm` (all privileges including
+full-table SELECT) on every table in `public` to `anon`, `authenticated`, and
+`service_role`. Postgres privilege hierarchy: if a role has table-level SELECT,
+column-level revokes are ignored.
 
-**Confirmed empirically** via MCP `execute_sql` with `set local role anon; select notes from public.upcoming_banquets limit 1;` — returned the row after the revoke, proving the revoke didn't take effect.
+**Confirmed empirically** in Phase 7 via MCP `execute_sql` with
+`set local role anon; select notes from public.upcoming_banquets limit 1;` —
+returned the row after the revoke.
+
+**Phase 7.5 successfully applies the correct pattern** for column-level UPDATE
+restrictions:
+
+- `revoke update on public.briefing_tasks from anon; grant update (is_completed) on public.briefing_tasks to anon;`
+- `revoke update on public.management_notes from anon; grant update (is_cleared, cleared_at, content, pinned) on public.management_notes to anon;`
+
+The pattern works for column-level UPDATE because Phase 7 didn't grant
+table-level UPDATE in the first place — only the policy permitted it. UPDATE
+column grants narrow what the policy allows. SELECT is the trapped case because
+table-level SELECT is in the default ACL.
 
 **How to apply:**
-- If you ever need to restrict anon to specific columns of a public-schema table, the sequence is:
-  1. `revoke select on public.<table> from anon` (table-level first)
-  2. `grant select (<col1>, <col2>, ...) on public.<table> to anon` (only safe columns)
-  3. Verify with `set local role anon; select <restricted_col> from public.<table>;` — should error, not return rows
-- Even then, Supabase's default ACL may reset privileges on new migrations that touch the table. Pair with a trigger or re-apply the revoke defensively.
-- A second trap: `set local role anon` in MCP `execute_sql` does not fully enforce column privileges because the MCP session user is a superuser. True verification requires a real anon-key HTTP request. Phase 7 caught the column-revoke failure via the empirical SELECT because Postgres DOES check column grants during SET LOCAL ROLE — but don't generalize this to "MCP role simulation is as good as a real anon client." Row-level checks via MCP are reliable; column-level checks need a real client.
-- For Phase 7 we chose to leave `kitchen_upcoming_events` as owner-rights (security_definer) and live with the Supabase advisor's ERROR-level `security_definer_view` lint rather than fight the default ACL. Re-litigate if/when a stronger column boundary is needed.
+
+- Column-level UPDATE restriction: revoke table UPDATE first, then grant on
+  specific columns. Works.
+- Column-level SELECT restriction: same sequence, but you're fighting Supabase's
+  default ACL. Even after the revoke, future migrations or schema changes may
+  reset privileges. Pair with a trigger or re-apply defensively if you need
+  this.
+- Phase 7.5 dropped `kitchen_upcoming_events` view entirely because the
+  JWT-stamped `org_id` makes per-row anon access safe — column-level hiding is
+  no longer needed for cross-tenant safety. If `notes` needs to be hidden from
+  kitchen for product reasons within an org, do it at the SELECT call, not at
+  RLS.
+- `set local role anon` in MCP `execute_sql` does NOT enforce column-level
+  privileges if the session user is a superuser. Row-level checks via MCP are
+  reliable; column-level checks need a real anon-key HTTP request.
