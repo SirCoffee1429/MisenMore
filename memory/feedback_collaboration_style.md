@@ -38,6 +38,6 @@ followed.
 - When Ryan asks "is there another way to do X" mid-phase, give the real
   alternatives (with tradeoffs) and a recommendation, then return to the active
   phase. Don't let exploration derail commit discipline.
-- At the end of each session look foor any orphaned CSS, JS, legacy code, or any
-  other cleanup opportunities and address them in that same session. Do not
-  create a separate task in notion for these items, that's too much work.
+- At the end of each session look for any orphaned CSS, other cleanup
+  opportunities and address them in that same session. Do not create a separate
+  task in notion for these items, that's too much work.
