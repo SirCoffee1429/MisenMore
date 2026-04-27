@@ -31,11 +31,12 @@ Sign-Ins (required for Phase 7.5).
 **Tech stack:** React 19 + Vite, React Router v7, Supabase (Postgres + RLS +
 Edge Functions), Vercel, Google Gemini 3 Flash, Postmark
 
-**Current phase:** Phase 7 closed (RLS live on all 11 domain tables). Phase 7.5
-is the next planned commit — anon kitchen JWT hardening (replaces raw-anon-key
-access with signInAnonymously + signed JWT carrying org_id, rewrites every anon
-RLS policy to scope on current_org_id() instead of `using (true)`). Phase 8
-follows (admin panel + Postmark per-org routing + first real org provisioning).
+**Current phase:** Phase 8 closed (admin panel + Postmark per-org routing
+shipped 2026-04-26, commit `7bf7be3`). Phase 7.5 is the next commit — anon
+kitchen JWT hardening, must land before first real customer org is provisioned.
+Phase numbering is logical, not chronological: Phase 7.5 ships after Phase 8
+because the security fix was scoped after the admin panel was already in flight.
+CHANGES.md documents the ordering note in the Phase 7.5 entry when it lands.
 
 **How to apply:** All work in this session is for MisenMore only. DailyBrief is
 never touched here. Before assuming a phase number from this memory, confirm

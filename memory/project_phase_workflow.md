@@ -18,13 +18,14 @@ work, ends with a single git commit, and produces two artifacts:
    checklist. Rewritten (not appended) at the end of each session.
 
 **Phase numbering:** Half-phases (e.g. Phase 7.5) are valid when a security or
-architectural fix needs to land before the next planned major phase. Phase 7.5
-(anon JWT hardening) precedes Phase 8 (admin panel + Postmark routing + first
-real org) because multi-tenant anon must be locked down before provisioning org
-#2.
+architectural fix needs to land between major phases. Phase numbers are logical,
+not chronological — Phase 7.5 (anon JWT hardening) shipped after Phase 8 (admin
+panel + Postmark routing) because the security scope was discovered after Phase
+8 was already in flight. Phase 7.5 must land before the first real customer org
+is provisioned via the admin panel.
 
-**Why:** Ryan ends sessions with"ending this session." CHANGES.md is permanent
-history; prompt.md is the handoff.
+**Why:** Ryan ends sessions with a request to write a handoff into prompt.md.
+CHANGES.md is permanent history; prompt.md is the handoff for the next session.
 
 **How to apply:**
 

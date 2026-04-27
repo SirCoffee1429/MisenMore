@@ -19,8 +19,7 @@ column-level revokes are ignored.
 `set local role anon; select notes from public.upcoming_banquets limit 1;` —
 returned the row after the revoke.
 
-**Phase 7.5 successfully applies the correct pattern** for column-level UPDATE
-restrictions:
+**Phase 7.5 applies the correct pattern** for column-level UPDATE restrictions:
 
 - `revoke update on public.briefing_tasks from anon; grant update (is_completed) on public.briefing_tasks to anon;`
 - `revoke update on public.management_notes from anon; grant update (is_cleared, cleared_at, content, pinned) on public.management_notes to anon;`
@@ -38,7 +37,7 @@ table-level SELECT is in the default ACL.
   default ACL. Even after the revoke, future migrations or schema changes may
   reset privileges. Pair with a trigger or re-apply defensively if you need
   this.
-- Phase 7.5 dropped `kitchen_upcoming_events` view entirely because the
+- Phase 7.5 will drop `kitchen_upcoming_events` view entirely because the
   JWT-stamped `org_id` makes per-row anon access safe — column-level hiding is
   no longer needed for cross-tenant safety. If `notes` needs to be hidden from
   kitchen for product reasons within an org, do it at the SELECT call, not at
