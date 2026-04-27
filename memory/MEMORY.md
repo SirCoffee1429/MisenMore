@@ -1,5 +1,8 @@
 # MisenMore Memory Index
 
+_You should read all of the following markdown documents when you begin a new
+session._
+
 - [Project Context](project_context.md) — What MisenMore is, why it was forked
   from DailyBrief, repo/Supabase details, current phase pointer
 - [Auth & Multi-Tenant Decisions](project_auth_decisions.md) — Org routing, role
