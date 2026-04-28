@@ -8,6 +8,5 @@ session. and all files inside the /memory folder*
 * project\_postmark\_routing
 * project\_supabase\_default\_acl\_gotcha
 
-* &#x20;
-feedback\_collaboration\_style
-
+* feedback\_collaboration\_style
+* feedback\_task\_cadence
