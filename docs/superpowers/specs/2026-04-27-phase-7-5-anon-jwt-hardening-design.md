@@ -39,11 +39,14 @@ your manager for the setup link." message. No redirect from error states; the us
 lands on `KitchenUnclaimed` with no automatic recovery.
 
 **Trigger conditions in OrgGate:**
-- No Supabase session at all.
-- Session exists but `session.user.is_anonymous !== true` AND `role !== 'kitchen_anon'`
-  (i.e., neither an authenticated office user nor a claimed kitchen device — shouldn't
-  happen in practice but guarded).
-- Session is anonymous but JWT has no `role` claim yet (claim flow not completed).
+- `session` is null (no session at all), OR
+- `session.user.is_anonymous === true` AND JWT has no `role: 'kitchen_anon'` claim
+  (anonymous session exists but claim flow has not been completed).
+
+Authenticated office users hitting `/k/:orgSlug` are out of scope for this wall —
+they either belong to the org and can see kitchen as a manager would, or don't, and
+that is a separate routing concern. `KitchenUnclaimed` is never shown to a
+non-anonymous authenticated user.
 
 ### 2. `signInAnonymously()` confined to `KitchenClaim.jsx`
 
@@ -82,6 +85,23 @@ statement. This prevents any window where kitchen anon has zero access to upcomi
 banquet data, and ensures the ordering is safe if the migration is ever replayed
 statement-by-statement.
 
+### 7. Cross-org re-claim semantics
+
+`claim_kitchen_session()` uses `ON CONFLICT (auth_user_id) DO UPDATE` — a device
+already claimed to org A that hits `/k/org-b/claim/:token-for-org-b` silently
+switches to org B. The `kitchen_claims` row is upserted in place; no new anon user
+is created; the old org binding is overwritten.
+
+`KitchenClaim.jsx` renders "Linked to {orgName}" for ~1.5s before redirecting to
+`/k/:orgSlug`. This brief display is the only user-visible signal for silent
+org-switches — it makes accidental re-claims detectable without requiring a
+confirmation prompt on every claim.
+
+Error states (token not found, revoked): render `KitchenUnclaimed` directly. No
+redirect, no automatic recovery. User must obtain a valid link from their manager.
+
+---
+
 ### 6. Sign-out / cross-device session collision (known quirk, no code fix)
 
 If a developer signs in to the office on the same browser they used to test a
@@ -103,7 +123,7 @@ change required.
    - Token hook rewrite (branch on `is_anonymous`)
    - 12 anon policy rewrites: `using (true)` → `current_role_claim() = 'kitchen_anon' AND org_id = current_org_id()`
    - Anon SELECT policy on `upcoming_banquets`
-   - Column-restrict UPDATE on `briefing_tasks` (only `is_completed`) and `management_notes` (only `is_cleared, cleared_at, content, pinned`)
+   - Column-restrict UPDATE on `briefing_tasks` and `management_notes`: `revoke update on <table> from anon; grant update (<col_list>) on <table> to anon;` — both statements required; the revoke is what closes the privilege gap (see `memory/project_supabase_default_acl_gotcha.md`). `briefing_tasks` columns: `is_completed`. `management_notes` columns: `is_cleared, cleared_at, content, pinned`.
    - Drop `kitchen_upcoming_events` view (after policy-add above)
 
 2. **Edge function** — `supabase/functions/kitchen-link-mutations/index.ts`
@@ -113,7 +133,7 @@ change required.
 4. **React updates**:
    - `AuthContext.jsx` — `readOrgClaims` kitchen_anon guard
    - `ProtectedRoute.jsx` — `is_anonymous` check
-   - `OrgContext.jsx` — stale comment updates
+   - `OrgContext.jsx` — review for logic assumptions tied to the old "no JWT claims" model; update stale comment ("anon kitchen has no JWT claims to scope queries server-side" is now false); confirm slug → org row resolution is still correct now that the JWT may carry `org_id`
    - `OrgResolver.jsx` / OrgGate — `KitchenUnclaimed` rendering for unclaimed sessions
    - `EightySixFeed.jsx` — soft-delete, `is_cleared` filter
    - `EventsBanquetsPage.jsx` — both paths read `upcoming_banquets` directly

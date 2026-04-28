@@ -111,15 +111,17 @@ All functions writing to domain tables stamp `org_id`. `match_chunks` RPC takes
 
 ## Session Initialization
 
-At start of every new session:
+At start of every new session: prompted by "start new session"
 
 1. Read `CHANGES.md` (project history)
 2. Read this file (project context)
 3. Read `IMPLEMENTATION_PLAN.md` (current phase)
 4. Read `MEMORY.md` chain (auto-pulls all `project_*` and `feedback_*`)
-5. Use `/superpowers` plugin
-6. Summarize last 3 completed tasks + current phase
-7. Output: `Context loaded. Ready to continue from [LAST TASK TITLE].`
+5. Read `phase-7-5-implementation-plan.md` only read the current task/step we
+   are currently working on. Not the whole file.
+6. Use `/superpowers` plugin
+7. Summarize last 3 completed tasks + current phase
+8. Output: `Context loaded. Ready to continue from [LAST TASK TITLE].`
 
 If any file missing, flag immediately before any work.
 
@@ -148,6 +150,8 @@ If any file missing, flag immediately before any work.
     context you discover that may be useful for future sessions.
 14. All memory files must be written to C:\MisenMore\Misenmore\memory\MEMORY.md,
     not the default Claude memory path.
+15. Update all `project_*` and `feedback_*` files. with relevant changes and new
+    knowledge gained during the session
 
 ## Phase 7.5 Will Change
 
